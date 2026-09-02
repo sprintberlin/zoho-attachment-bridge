@@ -55,6 +55,20 @@ Access tokens are never stored in env. They are derived from the refresh token a
 python3 scripts/onboarding.py
 ```
 
+For the first Books prototype, create the Self Client grant with this exact comma-separated scope string:
+
+```text
+ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBooks.bills.READ
+```
+
+- `expenses.CREATE`: upload expense receipts and attachments
+- `expenses.READ`: verify expense uploads by reading them back
+- `bills.CREATE`: upload bill attachments
+- `bills.READ`: verify bill uploads by reading them back
+- Optional `ZohoBooks.settings.READ`: discover `organization_id` through `GET /organizations`
+
+Do not add `ZohoBooks.fullaccess.ALL`. Scopes are fixed when the refresh token is created; adding one later requires a new grant and refresh token.
+
 Interactive: creates the Self Client grant flow, exchanges the grant token, writes the four variables, then verifies with a real upload and a read-back check.
 
 Manual steps are documented in `docs/SELF_CLIENT_SETUP.md`.

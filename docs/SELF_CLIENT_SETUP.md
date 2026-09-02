@@ -48,22 +48,50 @@ Still in the API Console, open your Self Client and switch to the **Generate Cod
 
 > ⚠️ The grant token expires within minutes and can only be exchanged **once**. Go straight to step 4.
 
-### Scopes
+### Exact scope string for the first Books prototype
 
-Request the narrowest scope that covers your use case.
+Copy this value into the **Scope** field as one comma-separated line:
 
-| App | Purpose | Scope |
+```text
+ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBooks.bills.READ
+```
+
+These four scopes are the minimum for the planned prototype:
+
+| Scope | Why it is required |
+|---|---|
+| `ZohoBooks.expenses.CREATE` | Upload a receipt or one or more attachments to an expense |
+| `ZohoBooks.expenses.READ` | Download/read the receipt or expense again to verify that the upload really succeeded |
+| `ZohoBooks.bills.CREATE` | Upload an attachment to a bill |
+| `ZohoBooks.bills.READ` | Read the bill attachment again to verify the upload |
+
+Optional:
+
+```text
+ZohoBooks.settings.READ
+```
+
+Add `ZohoBooks.settings.READ` only if the bridge should discover the Books `organization_id` through `GET /organizations`. It is not required when `organization_id` is passed to every call.
+
+The operation names above are taken from the official Zoho Books API documentation:
+
+- [Expenses API](https://www.zoho.com/books/api/v3/expenses/): `Add receipt to an expense` and `Add attachment to an expense` require `ZohoBooks.expenses.CREATE`; `Get an expense receipt` requires `ZohoBooks.expenses.READ`.
+- [Bills API](https://www.zoho.com/books/api/v3/bills/): `Add attachment to a bill` requires `ZohoBooks.bills.CREATE`; `Get a bill attachment` requires `ZohoBooks.bills.READ`.
+- [OAuth scopes](https://www.zoho.com/books/api/v3/oauth/): Books scopes follow `service.scope.operation`, with `CREATE`, `READ`, `UPDATE`, `DELETE`, or `ALL`.
+
+Do not add `ZohoBooks.fullaccess.ALL`. It is unnecessary for attachment uploads and grants substantially broader access.
+
+### Future app scopes
+
+The following entries are planning notes for later adapters and must be rechecked against the exact endpoint before implementation:
+
+| App | Purpose | Expected scope family |
 |---|---|---|
-| Books | expense receipts | `ZohoBooks.expenses.CREATE` |
-| Books | bill attachments | `ZohoBooks.bills.CREATE` |
-| Books | verify uploads by reading back | `ZohoBooks.expenses.READ`, `ZohoBooks.bills.READ` |
 | CRM | record attachments | `ZohoCRM.modules.attachments.CREATE`, `ZohoCRM.modules.attachments.READ` |
-| Projects | task and comment attachments | `ZohoProjects.projects.ALL`, `ZohoProjects.tasks.ALL` |
-| WorkDrive | file upload | `WorkDrive.files.CREATE`, `WorkDrive.files.READ` |
+| Projects | task and comment attachments | app-specific Projects create/read scopes |
+| WorkDrive | file upload | app-specific WorkDrive create/read scopes |
 
-Read scopes are not optional. The bridge verifies every upload by reading the record back, and without read access it cannot tell success from silent failure.
-
-Avoid `*.fullaccess.ALL`. It works, but it hands an automated tool far more power than it needs.
+Read access is part of the bridge contract. The bridge must verify every upload instead of trusting an HTTP status or success message.
 
 ---
 
@@ -134,6 +162,8 @@ The onboarding script finishes with a real upload followed by a read-back check.
 
 ## Rotating or revoking
 
-Refresh tokens do not expire on their own. To revoke access, delete the Self Client in the API Console. Any agent using it stops working immediately, so plan for that.
+Refresh tokens preserve the scopes selected during grant creation. To add or change scopes, generate a new grant token with the complete desired scope list and exchange it for a new refresh token.
 
-Zoho limits the number of refresh tokens per client. Reuse one refresh token per organization instead of generating a fresh one for every host.
+A refresh token remains valid until it is revoked. To revoke access, delete or revoke the Self Client/token in the Zoho API Console. Any agent using it stops working immediately, so plan for that.
+
+Zoho limits active refresh tokens to 20 per user. When the limit is exceeded, the oldest token is invalidated automatically. Reuse one refresh token per organization instead of generating a fresh one for every host.
