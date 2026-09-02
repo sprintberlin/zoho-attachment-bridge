@@ -12,6 +12,3 @@ venv/
 .DS_Store
 .idea/
 .vscode/
-
-# local test artifacts
-/tmp/

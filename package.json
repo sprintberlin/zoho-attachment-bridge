@@ -1,6 +1,6 @@
 {
   "name": "zoho-attachment-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Upload binary attachments to Zoho Books, CRM, Projects, Inventory and WorkDrive via the REST API when Zoho MCP upload actions fail silently. Self Client OAuth, multipart/form-data, verified uploads.",
   "keywords": [
     "zoho",

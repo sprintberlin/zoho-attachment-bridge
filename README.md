@@ -116,7 +116,7 @@ The agent keeps using MCP for everything else. The moment a file is involved, it
 
 | Requirement | Details |
 |---|---|
-| Python | 3.9 or newer |
+| Python | 3.9 or newer (tested up to 3.12, CI runs 3.9–3.13) |
 | Zoho account | with admin access to the [Zoho API Console](https://api-console.zoho.com) |
 | Self Client | created once per organization, see [setup guide](docs/SELF_CLIENT_SETUP.md) |
 | Network | outbound HTTPS to your Zoho data center |
@@ -194,7 +194,7 @@ Follow [`docs/SELF_CLIENT_SETUP.md`](docs/SELF_CLIENT_SETUP.md). It takes about 
 python3 scripts/onboarding.py
 ```
 
-The script walks you through the grant token exchange, writes the four environment variables to your `.env` file with `0600` permissions, and preserves any existing comments and unrelated variables.
+The script walks you through the grant token exchange, writes the four environment variables to your `.env` file with `0600` permissions, and preserves any existing comments and unrelated variables. Follow it with a real upload via `zoho_attach.py` to confirm the setup end to end.
 
 ### 3. Upload something
 
@@ -260,7 +260,7 @@ If you hit a **new silent-failure pattern** in Zoho MCP, please open an issue wi
 
 ## 📄 License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE). Changes are tracked in [`CHANGELOG.md`](CHANGELOG.md); common failure modes in [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 
 ---
 

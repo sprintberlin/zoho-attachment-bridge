@@ -1,6 +1,6 @@
 ---
 name: zoho-attachment-bridge
-version: 0.1.0
+version: 0.2.0
 description: Upload binary attachments to Zoho Books, CRM, Projects, Inventory and WorkDrive via the REST API when Zoho MCP upload actions fail silently. Self Client OAuth, multipart/form-data, verified uploads.
 ---
 
@@ -8,7 +8,7 @@ description: Upload binary attachments to Zoho Books, CRM, Projects, Inventory a
 
 Uploads binary files to Zoho when MCP cannot. Sits next to a Zoho MCP server: MCP handles records and reads, this skill handles bytes.
 
-> **Status: Books prototype implemented.** Self Client OAuth, expense receipt upload, bill attachment upload, and SHA-256 read-back verification are working. See `docs/ROADMAP.md`.
+> **Status: Books adapter implemented, expense receipts verified live.** See `CHANGELOG.md`, `docs/ROADMAP.md` and `docs/TROUBLESHOOTING.md`.
 
 ## When to use
 
@@ -79,9 +79,9 @@ ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBoo
 
 Do not add `ZohoBooks.fullaccess.ALL`. Scopes are fixed when the refresh token is created; adding one later requires a new grant and refresh token.
 
-Interactive: creates the Self Client grant flow, exchanges the grant token, writes the four variables, then verifies with a real upload and a read-back check.
+Interactive: walks through the Self Client grant flow, exchanges the grant token, and writes the four variables to the env file (mode 0600, unrelated lines preserved).
 
-Manual steps are documented in `docs/SELF_CLIENT_SETUP.md`.
+Manual steps are documented in `docs/SELF_CLIENT_SETUP.md`. Verify the setup with a real upload via `zoho_attach.py`.
 
 ## Usage
 
