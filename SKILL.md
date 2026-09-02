@@ -8,7 +8,7 @@ description: Upload binary attachments to Zoho Books, CRM, Projects, Inventory a
 
 Uploads binary files to Zoho when MCP cannot. Sits next to a Zoho MCP server: MCP handles records and reads, this skill handles bytes.
 
-> **Status: scaffolding.** Configuration contract is stable. Upload scripts are not implemented yet. See `docs/ROADMAP.md`.
+> **Status: Books prototype implemented.** Self Client OAuth, expense receipt upload, bill attachment upload, and SHA-256 read-back verification are working. See `docs/ROADMAP.md`.
 
 ## When to use
 
@@ -44,10 +44,20 @@ Four required environment variables. Everything else is a call argument.
 | `ZOHO_BRIDGE_DC` | yes | Data center: `eu`, `com`, `in`, `com.au`, `jp`, `ca`, `sa`, `com.cn` |
 | `ZOHO_BRIDGE_BOOKS_ORG_ID` | no | Default Books organization id |
 | `ZOHO_BRIDGE_PROJECTS_PORTAL_ID` | no | Default Projects portal id |
+| `ZOHO_BRIDGE_TOKEN_CACHE` | no | Override path for the access token cache |
 
 Multi-tenant: prefix per profile, e.g. `ZOHO_BRIDGE_ACME_CLIENT_ID`, selected with `--profile acme`.
 
-Access tokens are never stored in env. They are derived from the refresh token at runtime and cached for their one-hour lifetime.
+Access tokens are never stored in env. They are derived from the refresh token and cached in `~/.cache/zoho-attachment-bridge/tokens.json` (mode 0600) until shortly before expiry. The cache key is a hash; no secret is written in clear text. Without it, Zoho rate-limits the token endpoint after repeated calls.
+
+## File type limits
+
+Zoho enforces different allowlists per endpoint:
+
+| Target | Allowed extensions |
+|---|---|
+| `expense-receipt` | gif, png, jpeg, jpg, bmp, pdf, xls, xlsx, doc, docx |
+| `bill-attachment` | gif, png, jpeg, jpg, bmp, pdf |
 
 ## Onboarding
 
@@ -76,18 +86,22 @@ Manual steps are documented in `docs/SELF_CLIENT_SETUP.md`.
 ## Usage
 
 ```bash
-# planned interface, not yet implemented
+# Expense receipt upload with verification
 python3 scripts/zoho_attach.py --app books --target expense-receipt --id <expense_id> --file <path>
-python3 scripts/zoho_attach.py --app books --target bill-attachment  --id <bill_id>    --file <path>
+
+# Bill attachment upload with verification
+python3 scripts/zoho_attach.py --app books --target bill-attachment --id <bill_id> --file <path>
 ```
 
-Exit code `0` only after the uploaded file was confirmed present on the record.
+Pass `--organization-id <id>` or set `ZOHO_BRIDGE_BOOKS_ORG_ID`.
+
+Exit code `0` only after the uploaded file was confirmed present on the record via SHA-256 read-back verification.
 
 ## Scope
 
 | App | Target | Status |
 |---|---|---|
-| Books | expense receipt, bill attachment | in progress |
+| Books | expense receipt, bill attachment | implemented |
 | CRM | record attachment | planned |
 | Projects | task and comment attachment | planned |
 | Inventory | item image, bill attachment | planned |

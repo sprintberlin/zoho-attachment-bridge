@@ -18,8 +18,9 @@
 
 ---
 
-> **⚠️ Status: early scaffolding.**
-> The configuration contract and documentation are in place. The upload scripts are **not implemented yet**.
+> **✅ Status: Books prototype implemented and verified live.**
+> Self Client OAuth with persistent token caching, expense receipt upload, bill attachment upload,
+> and mandatory SHA-256 read-back verification are working against a real Zoho Books organization.
 > Track progress in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ---
@@ -136,12 +137,22 @@ Deliberately minimal. **Four variables** are all that is globally required.
 | `ZOHO_BRIDGE_DC` | ✅ | Data center: `eu`, `com`, `in`, `com.au`, `jp`, `ca`, `sa`, `com.cn` |
 | `ZOHO_BRIDGE_BOOKS_ORG_ID` | ➖ | Convenience default for Books |
 | `ZOHO_BRIDGE_PROJECTS_PORTAL_ID` | ➖ | Convenience default for Projects |
+| `ZOHO_BRIDGE_TOKEN_CACHE` | ➖ | Override path for the access token cache |
 
 ### Why so few?
 
 Everything else — organization id, portal id, record id, entity type — is a **call argument**, not configuration. An agent already knows which record it is working on, or can look it up via MCP in one call. Baking those into environment variables would only create stale state and a bigger blast radius when it drifts.
 
-**Access tokens are never stored.** They are derived from the refresh token at runtime and cached in memory for their one-hour lifetime.
+**Access tokens are never stored.** They are derived from the refresh token and cached in `~/.cache/zoho-attachment-bridge/tokens.json` with mode `0600` until shortly before expiry. The cache key is a SHA-256 hash, so no client secret or refresh token is written in clear text. This matters: Zoho rate-limits its token endpoint, and refreshing on every call will eventually be rejected with *"You have made too many requests continuously"*.
+
+### File type limits
+
+Zoho enforces a different allowlist per endpoint, and the bridge rejects violations before wasting an API call:
+
+| Target | Allowed extensions |
+|---|---|
+| `expense-receipt` | gif, png, jpeg, jpg, bmp, pdf, xls, xlsx, doc, docx |
+| `bill-attachment` | gif, png, jpeg, jpg, bmp, pdf |
 
 ### Example
 
@@ -183,18 +194,31 @@ Follow [`docs/SELF_CLIENT_SETUP.md`](docs/SELF_CLIENT_SETUP.md). It takes about 
 python3 scripts/onboarding.py
 ```
 
-The script walks you through the grant token exchange, prints the four environment variables ready to paste, and finishes with a **real upload plus a read-back check** — so you know it works before an agent depends on it.
+The script walks you through the grant token exchange, writes the four environment variables to your `.env` file with `0600` permissions, and preserves any existing comments and unrelated variables.
 
 ### 3. Upload something
 
 ```bash
-# planned interface — not implemented yet
+# Expense receipt
 python3 scripts/zoho_attach.py \
   --app books \
   --target expense-receipt \
   --id 123456000000123456 \
+  --organization-id 789012345 \
   --file ~/receipts/taxi.pdf
+
+# Bill attachment
+python3 scripts/zoho_attach.py \
+  --app books \
+  --target bill-attachment \
+  --id 987654000000987654 \
+  --organization-id 789012345 \
+  --file ~/invoices/vendor.pdf
 ```
+
+The `--organization-id` can be omitted if `ZOHO_BRIDGE_BOOKS_ORG_ID` is set in the environment.
+
+Exit code `0` only after the uploaded file was confirmed present on the record via SHA-256 read-back verification.
 
 ---
 
@@ -202,8 +226,8 @@ python3 scripts/zoho_attach.py \
 
 | App | Target | Status |
 |---|---|---|
-| **Books** | expense receipt | 🚧 in progress |
-| **Books** | bill attachment | 🚧 in progress |
+| **Books** | expense receipt | ✅ implemented |
+| **Books** | bill attachment | ✅ implemented |
 | CRM | record attachment | 📋 planned |
 | Projects | task and comment attachment | 📋 planned |
 | Inventory | item image, bill attachment | 📋 planned |
