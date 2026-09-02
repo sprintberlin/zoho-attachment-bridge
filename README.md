@@ -20,7 +20,7 @@
 
 > **✅ Status: Books prototype implemented and verified live.**
 > Self Client OAuth with persistent token caching, expense receipt upload, bill attachment upload,
-> and mandatory SHA-256 read-back verification are working against a real Zoho Books organization.
+> and mandatory SHA-256 read-back verification are working against a real Zoho Books test account.
 > Track progress in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ---
@@ -233,7 +233,7 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 | Inventory | item image, bill attachment | 📋 planned |
 | WorkDrive | file upload, new version | 📋 planned |
 
-Books comes first because that is where our own invoice pipeline breaks today.
+Books comes first because expense receipts and bill attachments are the most common automation use case.
 
 ---
 

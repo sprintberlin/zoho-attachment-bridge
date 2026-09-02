@@ -16,7 +16,7 @@
 - [x] Read-back verification with SHA-256 for both
 - [x] Token cache with automatic refresh (persistent, mode 0600, avoids Zoho token-endpoint rate limiting)
 - [x] Retry with exponential backoff on HTTP 429
-- [x] Verified live against a real Zoho Books organization (EU data center)
+- [x] Verified live against a Zoho Books test account
 - [ ] File size pre-check against the per-plan limit
 
 ## 0.3.0 — CRM and Projects

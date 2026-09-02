@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] — 2026-09-02
 
 First working release. Expense receipt uploads are verified against a live
-Zoho Books organization on the EU data center.
+Zoho Books test account.
 
 ### Added
 
@@ -42,14 +42,9 @@ Two defects found during live testing that would have made every upload fail:
 
 ### Verified
 
-```text
-File: zab_test_receipt.pdf (152 bytes, SHA-256: 494672bb164e4e64...)
-Upload response: Der Aufwendungsbeleg wurde angehängt.
-SUCCESS: Verified: SHA-256 match (494672bb...)
-```
-
-Read-back returned 152 bytes with a matching digest, and
-`expense_receipt_name` on the record was set to the uploaded filename.
+The live test returned the expected success response, and read-back returned
+the exact uploaded bytes with a matching SHA-256 digest. No account IDs,
+record IDs, filenames or credentials belong in this public repository.
 
 ### Known limitations
 
