@@ -18,10 +18,9 @@
 
 ---
 
-> **✅ Status: Books prototype implemented and verified live.**
-> Self Client OAuth with persistent token caching, expense receipt upload, bill attachment upload,
-> and mandatory SHA-256 read-back verification are working against a real Zoho Books test account.
-> Track progress in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+> **Status: 0.2.0.** Books expense receipts are implemented and verified live.
+> Bill attachments are implemented but only unit-tested. Next work is in
+> [`docs/ROADMAP.md`](docs/ROADMAP.md) and the [issue tracker](https://github.com/sprintberlin/zoho-attachment-bridge/issues).
 
 ---
 
@@ -222,18 +221,19 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 
 ---
 
-## 🗺️ Coverage
+## Coverage
 
-| App | Target | Status |
-|---|---|---|
-| **Books** | expense receipt | ✅ implemented |
-| **Books** | bill attachment | ✅ implemented |
-| CRM | record attachment | 📋 planned |
-| Projects | task and comment attachment | 📋 planned |
-| Inventory | item image, bill attachment | 📋 planned |
-| WorkDrive | file upload, new version | 📋 planned |
+| App | Target | Status | Issue |
+|---|---|---|---|
+| Books | expense receipt | implemented, verified live | — |
+| Books | bill attachment | implemented, unit tests only | [#1](https://github.com/sprintberlin/zoho-attachment-bridge/issues/1) |
+| Books | file size pre-check | not implemented | [#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2) |
+| CRM | record attachment | planned | [#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3) |
+| Projects | task and comment attachment | planned | [#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4) |
+| Inventory | item image, bill attachment | planned | [#8](https://github.com/sprintberlin/zoho-attachment-bridge/issues/8) |
+| WorkDrive | file upload, new version | planned | [#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9) |
 
-Books comes first because expense receipts and bill attachments are the most common automation use case.
+Progress and next work: [`docs/ROADMAP.md`](docs/ROADMAP.md). Open issues: [sprintberlin/zoho-attachment-bridge/issues](https://github.com/sprintberlin/zoho-attachment-bridge/issues).
 
 ---
 
@@ -242,19 +242,23 @@ Books comes first because expense receipts and bill attachments are the most com
 - Treat `ZOHO_BRIDGE_REFRESH_TOKEN` like a password. It grants standing API access until revoked. Never commit it, never print it, never paste it into a chat.
 - Request the **narrowest scope** per app. Do not use `ZohoBooks.fullaccess.ALL` when `ZohoBooks.expenses.CREATE` is enough.
 - Revoke unused Self Clients in the API Console.
-- Uploads are subject to Zoho rate limits and per-plan file size limits. The bridge backs off on HTTP 429 and refuses oversized files before wasting bandwidth.
+- Uploads are subject to Zoho rate limits and per-plan file size limits. The bridge backs off on HTTP 429. A local file-size pre-check is not implemented yet ([#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2)).
 
 ---
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome, especially:
+Start with [`docs/ROADMAP.md`](docs/ROADMAP.md) and pick an [open issue](https://github.com/sprintberlin/zoho-attachment-bridge/issues).
 
-- additional app or entity coverage
-- data-center-specific quirks
-- confirmed Zoho API behaviour that contradicts the documentation
+Rules that keep the bridge honest:
 
-If you hit a **new silent-failure pattern** in Zoho MCP, please open an issue with the exact request and response. Documenting those is half the value of this project.
+- Verify official Zoho API docs (endpoint, OAuth scopes, file types) before writing upload code. Do not copy the Books allowlists to another app.
+- Real `multipart/form-data`. Never trust a success status with an empty attachment array.
+- Exit code `0` only after SHA-256 read-back of the uploaded bytes.
+- No secrets, account IDs, record IDs or live filenames in this public repository.
+- Unit tests only in CI. No live Zoho calls from GitHub Actions.
+
+Pull requests that add a new silent-failure pattern from Zoho MCP are especially welcome.
 
 ---
 

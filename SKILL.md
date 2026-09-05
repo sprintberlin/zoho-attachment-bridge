@@ -101,11 +101,14 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 
 | App | Target | Status |
 |---|---|---|
-| Books | expense receipt, bill attachment | implemented |
+| Books | expense receipt | implemented, verified live |
+| Books | bill attachment | implemented, unit tests only |
 | CRM | record attachment | planned |
 | Projects | task and comment attachment | planned |
 | Inventory | item image, bill attachment | planned |
 | WorkDrive | file upload, new version | planned |
+
+Next work: `docs/ROADMAP.md` and the issue tracker.
 
 ## Safety
 
