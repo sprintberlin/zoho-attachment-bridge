@@ -81,13 +81,36 @@ The operation names above are taken from the official Zoho Books API documentati
 
 Do not add `ZohoBooks.fullaccess.ALL`. It is unnecessary for attachment uploads and grants substantially broader access.
 
+### Exact scope string for CRM record attachments
+
+CRM record attachment upload and mandatory SHA-256 read-back require this complete, comma-separated scope string:
+
+```text
+ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachments.READ
+```
+
+| Scope | Why it is required |
+|---|---|
+| `ZohoCRM.modules.ALL` | The attachment belongs to a parent module record passed with `--module` (for example `Leads`, `Contacts`, `Deals`, or `Accounts`). The bridge needs access to that parent record/module. |
+| `ZohoCRM.modules.attachments.CREATE` | `POST /crm/v8/{module}/{record_id}/Attachments` uploads the multipart form field named `file`. |
+| `ZohoCRM.modules.attachments.READ` | The bridge lists `id,File_Name`, downloads the just-uploaded attachment, and compares its SHA-256 digest. |
+
+All three are required: parent-module access plus attachment create/read access. If an existing refresh token lacks one of these scopes, generate a new code with the complete scope string and exchange it for a new refresh token. CRM does **not** use a Books `organization_id` — call the bridge with `--module <module>` instead.
+
+CRM endpoint sequence:
+
+```text
+POST https://www.zohoapis.<dc>/crm/v8/{module}/{record_id}/Attachments
+GET  https://www.zohoapis.<dc>/crm/v8/{module}/{record_id}/Attachments?fields=id,File_Name
+GET  https://www.zohoapis.<dc>/crm/v8/{module}/{record_id}/Attachments/{attachment_id}
+```
+
 ### Future app scopes
 
 The following entries are planning notes for later adapters and must be rechecked against the exact endpoint before implementation:
 
 | App | Purpose | Expected scope family |
 |---|---|---|
-| CRM | record attachments | `ZohoCRM.modules.attachments.CREATE`, `ZohoCRM.modules.attachments.READ` |
 | Projects | task and comment attachments | app-specific Projects create/read scopes |
 | WorkDrive | file upload | app-specific WorkDrive create/read scopes |
 

@@ -82,16 +82,32 @@ _MIME_MAP: Dict[str, str] = {
     ".png": "image/png",
     ".gif": "image/gif",
     ".bmp": "image/bmp",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
     ".pdf": "application/pdf",
     ".doc": "application/msword",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".xls": "application/vnd.ms-excel",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".csv": "text/csv",
     ".txt": "text/plain",
     ".rtf": "application/rtf",
     ".odt": "application/vnd.oasis.opendocument.text",
     ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+    ".odp": "application/vnd.oasis.opendocument.presentation",
+    ".zip": "application/zip",
+    ".tar": "application/x-tar",
+    ".gz": "application/gzip",
+    ".7z": "application/x-7z-compressed",
+    ".json": "application/json",
+    ".xml": "application/xml",
+    ".mp3": "audio/mpeg",
+    ".mp4": "video/mp4",
+    ".wav": "audio/wav",
 }
 
 
@@ -276,6 +292,31 @@ def books_base_url(dc: str) -> str:
     """Return the Zoho Books API v3 base URL (e.g. https://www.zohoapis.eu/books/v3)."""
     resolve_dc(dc)  # validate
     return f"https://www.{API_DC_MAP[dc.lower().strip()]}/books/v3"
+
+
+def crm_base_url(dc: str) -> str:
+    """Return the Zoho CRM API v8 base URL (e.g. https://www.zohoapis.eu/crm/v8)."""
+    resolve_dc(dc)  # validate
+    return f"https://www.{API_DC_MAP[dc.lower().strip()]}/crm/v8"
+
+
+def validate_crm_module(module: str) -> str:
+    """Validate a CRM module API name before interpolating it into a URL."""
+    value = str(module or "").strip()
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", value):
+        raise ValueError(
+            "Invalid CRM module API name. Use the module's API name, for example "
+            "Accounts, Contacts, Deals, Leads, or a custom module API name."
+        )
+    return value
+
+
+def validate_zoho_id(value: str, label: str) -> str:
+    """Validate a numeric Zoho record/attachment ID before URL construction."""
+    normalized = str(value or "").strip()
+    if not normalized.isdigit():
+        raise ValueError(f"{label} must contain digits only")
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -519,6 +560,15 @@ def validate_file_extension(file_path: str, target: str) -> str:
     Returns normalized lowercase extension (e.g. '.pdf').
     """
     ext = Path(file_path).suffix.lower()
+    # Zoho's CRM v8 record-attachment documentation does not publish a file
+    # extension allowlist. Do not invent one: send the file as
+    # application/octet-stream when its MIME type is unknown and let the API
+    # apply the account's real policy. An extension is still required so the
+    # uploaded file has a meaningful name.
+    if target == "record-attachment":
+        if not ext:
+            raise ValueError("CRM record attachments require a filename extension")
+        return ext
     allowed = allowed_extensions(target)
     if ext not in allowed:
         raise ValueError(
@@ -677,16 +727,29 @@ def api_request(
 
 def parse_zoho_response(body: bytes, status: int, action_context: str) -> Dict[str, Any]:
     """Parse and validate JSON response from Zoho API."""
+    if status < 400 and (status == 204 or not body.strip()):
+        return {}
+
     text = body.decode("utf-8", errors="replace")
 
     if status >= 400:
+        if not body.strip():
+            raise RuntimeError(f"{action_context} failed: HTTP {status} — empty response")
         # Check if error message is formatted as JSON
         try:
             data = json.loads(text)
-            if isinstance(data, dict) and "message" in data:
-                raise RuntimeError(
-                    f"{action_context} failed (HTTP {status}): {data.get('message')} (code: {data.get('code')})"
-                )
+            if isinstance(data, dict):
+                msg = data.get("message")
+                code = data.get("code")
+                if not msg and "data" in data and isinstance(data["data"], list) and data["data"]:
+                    first = data["data"][0]
+                    if isinstance(first, dict):
+                        msg = first.get("message")
+                        code = first.get("code")
+                if msg:
+                    raise RuntimeError(
+                        f"{action_context} failed (HTTP {status}): {msg} (code: {code})"
+                    )
         except json.JSONDecodeError:
             pass
         raise RuntimeError(f"{action_context} failed: HTTP {status} — {text}")
@@ -700,9 +763,20 @@ def parse_zoho_response(body: bytes, status: int, action_context: str) -> Dict[s
 
     if isinstance(data, dict):
         code = data.get("code")
-        if code is not None and code != 0:
+        if code is not None and code not in (0, "SUCCESS", "success"):
             msg = data.get("message", "unknown error")
             raise RuntimeError(f"{action_context} error (Zoho code {code}): {msg}")
+        if "data" in data and isinstance(data["data"], list) and data["data"]:
+            first = data["data"][0]
+            if isinstance(first, dict):
+                status_str = first.get("status")
+                item_code = first.get("code")
+                if status_str and str(status_str).lower() in ("error", "failure"):
+                    msg = first.get("message", "unknown error")
+                    raise RuntimeError(f"{action_context} error (Zoho code {item_code}): {msg}")
+                if item_code is not None and item_code not in ("SUCCESS", "success", 0):
+                    msg = first.get("message", "unknown error")
+                    raise RuntimeError(f"{action_context} error (Zoho code {item_code}): {msg}")
 
     return data
 
@@ -845,6 +919,147 @@ def verify_books_bill_attachment(
         )
     except Exception as exc:
         return False, f"Verification failed: unable to read back attachment ({exc})"
+
+    downloaded_sha256 = sha256_bytes(downloaded)
+    if downloaded_sha256 == expected_sha256:
+        return True, f"Verified: SHA-256 match ({downloaded_sha256})"
+    return False, (
+        f"Verification failed: SHA-256 mismatch. "
+        f"Expected {expected_sha256}, got {downloaded_sha256}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CRM API v8 Upload & Read-Back
+# ---------------------------------------------------------------------------
+
+def upload_crm_record_attachment(
+    dc: str,
+    access_token: str,
+    module: str,
+    record_id: str,
+    file_path: str,
+) -> Dict[str, Any]:
+    """
+    Upload attachment to a CRM record using multipart/form-data.
+    POST /crm/v8/{module}/{record_id}/Attachments
+    Multipart field name: 'file'
+    """
+    validate_file_extension(file_path, "record-attachment")
+    module = validate_crm_module(module)
+    record_id = validate_zoho_id(record_id, "CRM record ID")
+    body, content_type = build_multipart_body(file_path, field_name="file")
+    url = f"{crm_base_url(dc)}/{module}/{record_id}/Attachments"
+    status, resp_bytes = api_request(
+        url, access_token, data=body, content_type=content_type, method="POST"
+    )
+    return parse_zoho_response(resp_bytes, status, f"CRM {module} attachment upload")
+
+
+def list_crm_record_attachments(
+    dc: str,
+    access_token: str,
+    module: str,
+    record_id: str,
+    fields: str = "id,File_Name",
+) -> List[Dict[str, Any]]:
+    """
+    List attachments for a CRM record.
+    GET /crm/v8/{module}/{record_id}/Attachments?fields={fields}
+    """
+    module = validate_crm_module(module)
+    record_id = validate_zoho_id(record_id, "CRM record ID")
+    url = f"{crm_base_url(dc)}/{module}/{record_id}/Attachments?{urllib.parse.urlencode({'fields': fields})}"
+    status, body = api_request(url, access_token, method="GET")
+    if status == 204 or not body.strip():
+        return []
+    data = parse_zoho_response(body, status, f"List CRM {module} attachments")
+    attachments = data.get("data", [])
+    if not isinstance(attachments, list):
+        return []
+    return attachments
+
+
+def download_crm_record_attachment(
+    dc: str,
+    access_token: str,
+    module: str,
+    record_id: str,
+    attachment_id: str,
+) -> bytes:
+    """
+    Download an attachment of a CRM record.
+    GET /crm/v8/{module}/{record_id}/Attachments/{attachment_id}
+    """
+    module = validate_crm_module(module)
+    record_id = validate_zoho_id(record_id, "CRM record ID")
+    attachment_id = validate_zoho_id(attachment_id, "CRM attachment ID")
+    url = f"{crm_base_url(dc)}/{module}/{record_id}/Attachments/{attachment_id}"
+    status, body = api_request(url, access_token, method="GET")
+    if status >= 400:
+        err_text = body.decode("utf-8", errors="replace")
+        raise RuntimeError(f"Failed to download CRM attachment: HTTP {status} — {err_text}")
+    return body
+
+
+def verify_crm_record_attachment(
+    dc: str,
+    access_token: str,
+    module: str,
+    record_id: str,
+    file_name: str,
+    expected_sha256: str,
+    attachment_id: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """
+    Read back and verify the uploaded CRM attachment.
+    1. Fetches attachment list via GET .../Attachments?fields=id,File_Name
+    2. Identifies the attachment ID (matching attachment_id or file_name)
+    3. Downloads the attachment via GET .../Attachments/{attachment_id}
+    4. Compares SHA-256 hash.
+    Returns (success_bool, message).
+    """
+    try:
+        attachments = list_crm_record_attachments(dc, access_token, module, record_id)
+    except Exception as exc:
+        return False, f"Verification failed: unable to list CRM attachments ({exc})"
+
+    target_id: Optional[str] = None
+    if attachment_id:
+        for att in attachments:
+            if str(att.get("id")) == str(attachment_id):
+                target_id = str(attachment_id)
+                break
+        if not target_id:
+            return False, (
+                f"Verification failed: newly uploaded attachment '{attachment_id}' "
+                f"was not found on CRM {module} record {record_id}"
+            )
+    else:
+        filename_matches = [
+            att for att in attachments
+            if att.get("File_Name") == file_name or att.get("file_name") == file_name
+        ]
+        if len(filename_matches) == 1 and filename_matches[0].get("id"):
+            target_id = str(filename_matches[0]["id"])
+        elif len(filename_matches) > 1:
+            return False, (
+                f"Verification failed: multiple CRM attachments named '{file_name}' "
+                "exist; upload response did not identify the newly uploaded attachment"
+            )
+
+    if not target_id:
+        return False, (
+            f"Verification failed: Attachment '{file_name}' not found "
+            f"on CRM {module} record {record_id}"
+        )
+
+    try:
+        downloaded = download_crm_record_attachment(
+            dc, access_token, module, record_id, target_id
+        )
+    except Exception as exc:
+        return False, f"Verification failed: unable to read back CRM attachment ({exc})"
 
     downloaded_sha256 = sha256_bytes(downloaded)
     if downloaded_sha256 == expected_sha256:

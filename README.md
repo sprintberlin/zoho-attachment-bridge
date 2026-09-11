@@ -18,8 +18,7 @@
 
 ---
 
-> **Status: 0.2.0.** Books expense receipts are implemented and verified live.
-> Bill attachments are implemented but only unit-tested. Next work is in
+> **Status: 0.3.0 (unreleased).** Books expense receipts remain implemented and verified live; CRM v8 record attachments are implemented with mocked upload/list/download SHA-256 verification. Bill attachments are implemented but only unit-tested. Next work is in
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) and the [issue tracker](https://github.com/sprintberlin/zoho-attachment-bridge/issues).
 
 ---
@@ -152,6 +151,7 @@ Zoho enforces a different allowlist per endpoint, and the bridge rejects violati
 |---|---|
 | `expense-receipt` | gif, png, jpeg, jpg, bmp, pdf, xls, xlsx, doc, docx |
 | `bill-attachment` | gif, png, jpeg, jpg, bmp, pdf |
+| `record-attachment` (CRM) | Zoho publishes no extension allowlist for this endpoint; the bridge requires a filename extension and leaves enforcement to the API |
 
 ### Example
 
@@ -213,9 +213,25 @@ python3 scripts/zoho_attach.py \
   --id 987654000000987654 \
   --organization-id 789012345 \
   --file ~/invoices/vendor.pdf
+
+# CRM record attachment — no organization ID; --module is required
+python3 scripts/zoho_attach.py \
+  --app crm \
+  --target record-attachment \
+  --module Deals \
+  --id 123456000000123456 \
+  --file ~/contracts/customer.pdf
 ```
 
-The `--organization-id` can be omitted if `ZOHO_BRIDGE_BOOKS_ORG_ID` is set in the environment.
+The `--organization-id` can be omitted if `ZOHO_BRIDGE_BOOKS_ORG_ID` is set in the environment; it applies to Books only. **CRM does not use an organization ID** and requires `--module` (for example `Leads`, `Contacts`, `Deals`, or `Accounts`).
+
+For CRM record attachments, create the refresh token with this exact scope set:
+
+```text
+ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachments.READ
+```
+
+`ZohoCRM.modules.ALL` grants access to the parent record module; the attachment scopes authorize the upload and the mandatory list/download SHA-256 verification. These scopes are fixed in the refresh token, so generate a new grant token if an existing token lacks any of them.
 
 Exit code `0` only after the uploaded file was confirmed present on the record via SHA-256 read-back verification.
 
@@ -228,7 +244,7 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 | Books | expense receipt | implemented, verified live | — |
 | Books | bill attachment | implemented, unit tests only | [#1](https://github.com/sprintberlin/zoho-attachment-bridge/issues/1) |
 | Books | file size pre-check | not implemented | [#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2) |
-| CRM | record attachment | planned | [#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3) |
+| CRM | record attachment | implemented, mocked upload/list/download verification | [#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3) |
 | Projects | task and comment attachment | planned | [#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4) |
 | Inventory | item image, bill attachment | planned | [#8](https://github.com/sprintberlin/zoho-attachment-bridge/issues/8) |
 | WorkDrive | file upload, new version | planned | [#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9) |
@@ -240,7 +256,7 @@ Progress and next work: [`docs/ROADMAP.md`](docs/ROADMAP.md). Open issues: [spri
 ## 🔒 Security
 
 - Treat `ZOHO_BRIDGE_REFRESH_TOKEN` like a password. It grants standing API access until revoked. Never commit it, never print it, never paste it into a chat.
-- Request the **narrowest scope** per app. Do not use `ZohoBooks.fullaccess.ALL` when `ZohoBooks.expenses.CREATE` is enough.
+- Request the **narrowest scope** per app. Do not use `ZohoBooks.fullaccess.ALL`. For CRM record attachments, `ZohoCRM.modules.ALL` is additionally needed for the parent module, alongside `ZohoCRM.modules.attachments.CREATE` and `ZohoCRM.modules.attachments.READ`.
 - Revoke unused Self Clients in the API Console.
 - Uploads are subject to Zoho rate limits and per-plan file size limits. The bridge backs off on HTTP 429. A local file-size pre-check is not implemented yet ([#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2)).
 

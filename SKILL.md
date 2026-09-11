@@ -1,6 +1,6 @@
 ---
 name: zoho-attachment-bridge
-version: 0.2.0
+version: 0.3.0
 description: Upload binary attachments to Zoho Books, CRM, Projects, Inventory and WorkDrive via the REST API when Zoho MCP upload actions fail silently. Self Client OAuth, multipart/form-data, verified uploads.
 ---
 
@@ -8,7 +8,7 @@ description: Upload binary attachments to Zoho Books, CRM, Projects, Inventory a
 
 Uploads binary files to Zoho when MCP cannot. Sits next to a Zoho MCP server: MCP handles records and reads, this skill handles bytes.
 
-> **Status: Books adapter implemented, expense receipts verified live.** See `CHANGELOG.md`, `docs/ROADMAP.md` and `docs/TROUBLESHOOTING.md`.
+> **Status: Books adapter implemented, expense receipts verified live; CRM v8 record attachments implemented with mocked upload/list/download verification.** See `CHANGELOG.md`, `docs/ROADMAP.md` and `docs/TROUBLESHOOTING.md`.
 
 ## When to use
 
@@ -58,6 +58,7 @@ Zoho enforces different allowlists per endpoint:
 |---|---|
 | `expense-receipt` | gif, png, jpeg, jpg, bmp, pdf, xls, xlsx, doc, docx |
 | `bill-attachment` | gif, png, jpeg, jpg, bmp, pdf |
+| `record-attachment` (CRM) | Zoho publishes no extension allowlist for this endpoint; the bridge requires a filename extension and leaves enforcement to the API |
 
 ## Onboarding
 
@@ -79,6 +80,18 @@ ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBoo
 
 Do not add `ZohoBooks.fullaccess.ALL`. Scopes are fixed when the refresh token is created; adding one later requires a new grant and refresh token.
 
+For CRM record attachments, create a separate refresh token (or regenerate the complete grant) with:
+
+```text
+ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachments.READ
+```
+
+- `ZohoCRM.modules.ALL`: access to the parent record module named with `--module`.
+- `ZohoCRM.modules.attachments.CREATE`: upload the multipart `file` attachment.
+- `ZohoCRM.modules.attachments.READ`: list the attachment and download it for mandatory SHA-256 verification.
+
+The parent module scope and both attachment scopes are required. Zoho scopes are fixed when the refresh token is created, so an existing token missing any one of them needs a new grant and refresh token.
+
 Interactive: walks through the Self Client grant flow, exchanges the grant token, and writes the four variables to the env file (mode 0600, unrelated lines preserved).
 
 Manual steps are documented in `docs/SELF_CLIENT_SETUP.md`. Verify the setup with a real upload via `zoho_attach.py`.
@@ -91,9 +104,19 @@ python3 scripts/zoho_attach.py --app books --target expense-receipt --id <expens
 
 # Bill attachment upload with verification
 python3 scripts/zoho_attach.py --app books --target bill-attachment --id <bill_id> --file <path>
+
+# CRM v8 record attachment upload with verification
+# --module is required; CRM does not use --organization-id.
+python3 scripts/zoho_attach.py --app crm --target record-attachment --module <module> --id <record_id> --file <path>
 ```
 
-Pass `--organization-id <id>` or set `ZOHO_BRIDGE_BOOKS_ORG_ID`.
+Pass `--organization-id <id>` or set `ZOHO_BRIDGE_BOOKS_ORG_ID` for Books. CRM does not require or use an organization ID; pass the parent module explicitly via `--module` (such as `Leads`, `Contacts`, `Deals`, or `Accounts`).
+
+For CRM verification, the bridge performs:
+
+1. `POST /crm/v8/{module}/{record_id}/Attachments` with multipart field `file`.
+2. `GET /crm/v8/{module}/{record_id}/Attachments?fields=id,File_Name` to identify the newly uploaded attachment.
+3. `GET /crm/v8/{module}/{record_id}/Attachments/{attachment_id}` and a SHA-256 comparison against the local file.
 
 Exit code `0` only after the uploaded file was confirmed present on the record via SHA-256 read-back verification.
 
@@ -103,7 +126,7 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 |---|---|---|
 | Books | expense receipt | implemented, verified live |
 | Books | bill attachment | implemented, unit tests only |
-| CRM | record attachment | planned |
+| CRM | record attachment | implemented, mocked upload/list/download verification |
 | Projects | task and comment attachment | planned |
 | Inventory | item image, bill attachment | planned |
 | WorkDrive | file upload, new version | planned |
@@ -113,6 +136,6 @@ Next work: `docs/ROADMAP.md` and the issue tracker.
 ## Safety
 
 - Treat `ZOHO_BRIDGE_REFRESH_TOKEN` as a password. Never print or log it.
-- Request the narrowest OAuth scope per app. Do not use `ZohoBooks.fullaccess.ALL`.
+- Request the narrowest OAuth scope per app. Do not use `ZohoBooks.fullaccess.ALL`. CRM record attachments need `ZohoCRM.modules.ALL` for their parent record module plus `ZohoCRM.modules.attachments.CREATE` and `ZohoCRM.modules.attachments.READ`.
 - Confirm the target organization or portal id before uploading customer files.
 - Respect Zoho rate limits. Back off on HTTP 429.

@@ -2,7 +2,7 @@
 
 Tracked in GitHub issues. This file is the index, not a second tracker.
 
-Current release: **0.2.0**. Books expense receipts are implemented and verified live. Bill attachments are implemented but only unit-tested.
+Current release: **0.3.0 (unreleased)**. Books expense receipts are implemented and verified live. Bill attachments are implemented but only unit-tested. CRM v8 record attachments are implemented with mocked upload/list/download verification.
 
 ## 0.1.0 — scaffolding
 
@@ -20,7 +20,7 @@ Completed. Repository, configuration contract, MCP failure documentation, Self C
 
 ## 0.3.0 — CRM and Projects
 
-- [ ] CRM record attachments — [#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3)
+- [x] CRM record attachments (`POST /crm/v8/{module}/{record_id}/Attachments`) — mocked upload/list/download SHA-256 verification ([#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3))
 - [ ] Projects task and comment attachments — [#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4)
 - [ ] Organization and portal resolution helpers — [#10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10)
 

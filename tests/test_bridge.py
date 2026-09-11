@@ -70,6 +70,19 @@ class TestDCResolution(unittest.TestCase):
         with self.assertRaises(ValueError):
             bridge.books_base_url("invalid_dc")
 
+    def test_crm_base_url_uses_zohoapis_host(self):
+        expected = {
+            "eu": "https://www.zohoapis.eu/crm/v8",
+            "com": "https://www.zohoapis.com/crm/v8",
+            "ca": "https://www.zohoapis.ca/crm/v8",
+        }
+        for dc, url in expected.items():
+            self.assertEqual(bridge.crm_base_url(dc), url)
+
+    def test_crm_base_url_rejects_invalid_dc(self):
+        with self.assertRaises(ValueError):
+            bridge.crm_base_url("invalid_dc")
+
     def test_case_insensitive_and_whitespace(self):
         self.assertEqual(bridge.resolve_dc("  EU  "), "zoho.eu")
         self.assertEqual(bridge.resolve_dc("COM.AU"), "zoho.com.au")
@@ -105,6 +118,17 @@ class TestFileValidationAndMime(unittest.TestCase):
         for fn in invalid:
             with self.assertRaises(ValueError):
                 bridge.validate_file_extension(fn, "bill-attachment")
+
+    def test_crm_record_attachment_allowlist(self):
+        # Zoho does not document an extension allowlist for the CRM v8 record
+        # attachment endpoint. The bridge must not invent one.
+        valid = ["document.pdf", "image.webp", "data.csv", "archive.zip", "installer.exe"]
+        for fn in valid:
+            ext = bridge.validate_file_extension(fn, "record-attachment")
+            self.assertTrue(ext.startswith("."))
+
+        with self.assertRaises(ValueError):
+            bridge.validate_file_extension("extensionless", "record-attachment")
 
     def test_unknown_target_raises(self):
         with self.assertRaises(ValueError):
@@ -428,6 +452,179 @@ class TestBooksOperationsAndVerification(unittest.TestCase):
         self.assertIn("Verified", msg)
 
 
+class TestCrmOperationsAndVerification(unittest.TestCase):
+    """Test CRM v8 record attachment upload and mandatory read-back flow."""
+
+    @patch("bridge.api_request")
+    def test_upload_crm_record_attachment_uses_v8_file_multipart_endpoint(self, mock_api):
+        mock_api.return_value = (201, json.dumps({
+            "data": [{
+                "code": "SUCCESS",
+                "details": {"id": "4876876000001021001"},
+                "message": "attachment added successfully",
+                "status": "success",
+            }],
+        }).encode("utf-8"))
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"CRM attachment data")
+            tmp_path = tmp.name
+
+        try:
+            response = bridge.upload_crm_record_attachment(
+                dc="eu",
+                access_token="tok",
+                module="Leads",
+                record_id="4876876000000376008",
+                file_path=tmp_path,
+            )
+            self.assertEqual(response["data"][0]["details"]["id"], "4876876000001021001")
+            mock_api.assert_called_once()
+            args, kwargs = mock_api.call_args
+            self.assertEqual(
+                args[0],
+                "https://www.zohoapis.eu/crm/v8/Leads/4876876000000376008/Attachments",
+            )
+            self.assertEqual(kwargs["method"], "POST")
+            self.assertIn("multipart/form-data; boundary=", kwargs["content_type"])
+            self.assertIn(b'name="file"', kwargs["data"])
+            self.assertIn(b"CRM attachment data", kwargs["data"])
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("bridge.api_request")
+    def test_list_crm_record_attachments_requests_id_and_filename_fields(self, mock_api):
+        mock_api.return_value = (200, json.dumps({
+            "data": [{"id": "4876876000001021001", "File_Name": "invoice.pdf"}],
+        }).encode("utf-8"))
+
+        attachments = bridge.list_crm_record_attachments(
+            "com", "tok", "Deals", "4876876000000376008"
+        )
+
+        self.assertEqual(attachments, [{"id": "4876876000001021001", "File_Name": "invoice.pdf"}])
+        mock_api.assert_called_once_with(
+            "https://www.zohoapis.com/crm/v8/Deals/4876876000000376008/Attachments?fields=id%2CFile_Name",
+            "tok",
+            method="GET",
+        )
+
+    @patch("bridge.api_request")
+    def test_download_crm_record_attachment_uses_attachment_endpoint(self, mock_api):
+        mock_api.return_value = (200, b"downloaded CRM attachment")
+
+        data = bridge.download_crm_record_attachment(
+            "ca", "tok", "Contacts", "4876876000000376008", "4876876000001021001"
+        )
+
+        self.assertEqual(data, b"downloaded CRM attachment")
+        mock_api.assert_called_once_with(
+            "https://www.zohoapis.ca/crm/v8/Contacts/4876876000000376008/Attachments/4876876000001021001",
+            "tok",
+            method="GET",
+        )
+
+    @patch("bridge.download_crm_record_attachment")
+    @patch("bridge.list_crm_record_attachments")
+    def test_verify_crm_record_attachment_lists_finds_downloads_and_hashes(
+        self, mock_list, mock_download
+    ):
+        raw_bytes = b"exact CRM attachment bytes"
+        mock_list.return_value = [
+            {"id": "4876876000001021000", "File_Name": "old.pdf"},
+            {"id": "4876876000001021001", "File_Name": "invoice.pdf"},
+        ]
+        mock_download.return_value = raw_bytes
+
+        verified, message = bridge.verify_crm_record_attachment(
+            dc="eu",
+            access_token="tok",
+            module="Deals",
+            record_id="4876876000000376008",
+            file_name="invoice.pdf",
+            expected_sha256=bridge.sha256_bytes(raw_bytes),
+            attachment_id="4876876000001021001",
+        )
+
+        self.assertTrue(verified)
+        self.assertIn("Verified", message)
+        mock_list.assert_called_once_with("eu", "tok", "Deals", "4876876000000376008")
+        mock_download.assert_called_once_with("eu", "tok", "Deals", "4876876000000376008", "4876876000001021001")
+
+    @patch("bridge.download_crm_record_attachment")
+    @patch("bridge.list_crm_record_attachments")
+    def test_verify_crm_record_attachment_uses_filename_when_upload_has_no_id(
+        self, mock_list, mock_download
+    ):
+        raw_bytes = b"exact CRM attachment bytes"
+        mock_list.return_value = [
+            {"id": "4876876000001021001", "File_Name": "invoice.pdf"}
+        ]
+        mock_download.return_value = raw_bytes
+
+        verified, _ = bridge.verify_crm_record_attachment(
+            "eu", "tok", "Deals", "4876876000000376008", "invoice.pdf",
+            bridge.sha256_bytes(raw_bytes),
+        )
+
+        self.assertTrue(verified)
+        mock_download.assert_called_once_with("eu", "tok", "Deals", "4876876000000376008", "4876876000001021001")
+
+    @patch("bridge.list_crm_record_attachments", return_value=[])
+    def test_verify_crm_record_attachment_fails_when_not_listed(self, mock_list):
+        verified, message = bridge.verify_crm_record_attachment(
+            "eu", "tok", "Deals", "4876876000000376008", "missing.pdf", "a" * 64
+        )
+
+        self.assertFalse(verified)
+        self.assertIn("not found", message)
+
+    @patch("bridge.download_crm_record_attachment")
+    @patch("bridge.list_crm_record_attachments")
+    def test_verify_crm_record_attachment_rejects_ambiguous_filename(
+        self, mock_list, mock_download
+    ):
+        mock_list.return_value = [
+            {"id": "4876876000001021001", "File_Name": "invoice.pdf"},
+            {"id": "4876876000001021002", "File_Name": "invoice.pdf"},
+        ]
+
+        verified, message = bridge.verify_crm_record_attachment(
+            "eu", "tok", "Deals", "4876876000000376008", "invoice.pdf", "a" * 64
+        )
+
+        self.assertFalse(verified)
+        self.assertIn("multiple CRM attachments", message)
+        mock_download.assert_not_called()
+
+    def test_crm_url_components_reject_injection(self):
+        with self.assertRaises(ValueError):
+            bridge.validate_crm_module("Deals/123/Attachments")
+        with self.assertRaises(ValueError):
+            bridge.validate_zoho_id("123?fields=all", "CRM record ID")
+
+    def test_parse_error_does_not_accept_empty_http_error(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            bridge.parse_zoho_response(b"", 403, "CRM attachment upload")
+        self.assertIn("HTTP 403", str(ctx.exception))
+
+    @patch("bridge.download_crm_record_attachment")
+    @patch("bridge.list_crm_record_attachments")
+    def test_verify_crm_record_attachment_rejects_upload_id_not_in_list(
+        self, mock_list, mock_download
+    ):
+        mock_list.return_value = [{"id": "4876876000001021099", "File_Name": "invoice.pdf"}]
+
+        verified, message = bridge.verify_crm_record_attachment(
+            "eu", "tok", "Deals", "4876876000000376008", "invoice.pdf", "a" * 64,
+            attachment_id="4876876000001021001",
+        )
+
+        self.assertFalse(verified)
+        self.assertIn("newly uploaded attachment", message)
+        mock_download.assert_not_called()
+
+
 class TestCliZohoAttach(unittest.TestCase):
     """Test zoho_attach CLI execution."""
 
@@ -488,6 +685,72 @@ class TestCliZohoAttach(unittest.TestCase):
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+
+    def test_crm_requires_module_before_authentication(self):
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"CRM bytes")
+            tmp_path = tmp.name
+
+        try:
+            with patch("zoho_attach.load_env") as mock_env, \
+                 patch("zoho_attach.refresh_access_token") as mock_token:
+                mock_env.return_value = {
+                    "client_id": "cid",
+                    "client_secret": "csec",
+                    "refresh_token": "reftok",
+                    "dc": "eu",
+                    "books_org_id": "",
+                }
+                ret = zoho_attach.main([
+                    "--app", "crm",
+                    "--target", "record-attachment",
+                    "--id", "4876876000000376008",
+                    "--file", tmp_path,
+                ])
+            self.assertEqual(ret, 1)
+            mock_token.assert_not_called()
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("zoho_attach.verify_crm_record_attachment", return_value=(True, "Verified match"))
+    @patch("zoho_attach.upload_crm_record_attachment", return_value={
+        "data": [{"code": "SUCCESS", "details": {"id": "4876876000001021001"}}],
+    })
+    @patch("zoho_attach.refresh_access_token", return_value="mock_access_token")
+    @patch("zoho_attach.load_env")
+    def test_successful_crm_upload_does_not_require_organization_id(
+        self, mock_env, mock_tok, mock_upload, mock_verify
+    ):
+        mock_env.return_value = {
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "reftok",
+            "dc": "eu",
+            "books_org_id": "",
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"CRM document")
+            tmp_path = tmp.name
+
+        try:
+            ret = zoho_attach.main([
+                "--app", "crm",
+                "--target", "record-attachment",
+                "--module", "Deals",
+                "--id", "4876876000000376008",
+                "--file", tmp_path,
+            ])
+            self.assertEqual(ret, 0)
+            mock_upload.assert_called_once()
+            upload_kwargs = mock_upload.call_args.kwargs
+            self.assertEqual(upload_kwargs["module"], "Deals")
+            self.assertNotIn("organization_id", upload_kwargs)
+            mock_verify.assert_called_once()
+            verify_kwargs = mock_verify.call_args.kwargs
+            self.assertEqual(verify_kwargs["attachment_id"], "4876876000001021001")
+        finally:
+            os.unlink(tmp_path)
 
 
 class TestCliOnboarding(unittest.TestCase):
@@ -566,7 +829,8 @@ class TestTokenCache(unittest.TestCase):
         mode = stat.S_IMODE(os.stat(self.cache).st_mode)
         self.assertEqual(mode, 0o600)
 
-        raw = open(self.cache, encoding="utf-8").read()
+        with open(self.cache, encoding="utf-8") as fh:
+            raw = fh.read()
         self.assertNotIn("csec", raw)
         self.assertNotIn("rtok", raw)
         self.assertNotIn("cid", raw)
@@ -576,7 +840,8 @@ class TestTokenCache(unittest.TestCase):
         with patch("urllib.request.urlopen", return_value=self._fake_response(payload)):
             bridge.refresh_access_token("cid", "csec", "rtok", "eu")
 
-        entries = json.loads(open(self.cache, encoding="utf-8").read())
+        with open(self.cache, encoding="utf-8") as fh:
+            entries = json.loads(fh.read())
         for key in entries:
             entries[key]["expires_at"] = time.time() - 10
         with open(self.cache, "w", encoding="utf-8") as fh:

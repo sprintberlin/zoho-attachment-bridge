@@ -5,6 +5,32 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-09-11
+
+### Added
+
+- CRM v8 record attachment adapter with `--app crm --target record-attachment`
+  and mandatory `--module`; CRM does not use a Books `organization_id`.
+- Multipart upload using `POST https://www.zohoapis.<dc>/crm/v8/{module}/{record_id}/Attachments`
+  and form field `file`.
+- Mandatory CRM read-back verification: list attachments with `fields=id,File_Name`,
+  identify the just-uploaded attachment, download it, and compare SHA-256.
+  Verification rejects ambiguous matching filenames rather than accepting an
+  unprovable result.
+- Mock-only unit coverage for CRM URLs, multipart field, attachment discovery,
+  download, SHA-256 match/failure paths, CLI module requirement, and the fact
+  that CRM does not require an organization ID.
+- CRM Self Client scope documentation: `ZohoCRM.modules.ALL`,
+  `ZohoCRM.modules.attachments.CREATE`, and `ZohoCRM.modules.attachments.READ`.
+- Strict validation for CRM module API names and numeric record/attachment IDs;
+  the bridge does not invent a CRM file-extension allowlist that Zoho's v8
+  attachment documentation does not publish.
+
+### Verified
+
+- The CRM implementation was tested entirely with mocks and temporary files;
+  no live Zoho call, account ID, record ID, or secret was used.
+
 ## [0.2.0] — 2026-09-02
 
 First working release. Expense receipt uploads are verified against a live
@@ -51,7 +77,7 @@ record IDs, filenames or credentials belong in this public repository.
 - Bill attachment upload is covered by unit tests only. No live verification yet
   (see issue tracker).
 - No file size pre-check before upload.
-- Only Zoho Books is implemented. CRM, Projects, Inventory and WorkDrive are planned.
+- CRM, Projects, Inventory and WorkDrive were not implemented in this release.
 
 ## [0.1.0] — 2026-09-02
 

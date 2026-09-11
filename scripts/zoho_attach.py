@@ -36,9 +36,11 @@ from bridge import (
     sha256_file,
     upload_books_bill_attachment,
     upload_books_expense_receipt,
+    upload_crm_record_attachment,
     validate_file_extension,
     verify_books_bill_attachment,
     verify_books_expense_receipt,
+    verify_crm_record_attachment,
 )
 
 
@@ -49,24 +51,30 @@ def parse_args(args=None) -> argparse.Namespace:
     parser.add_argument(
         "--app",
         required=True,
-        choices=["books"],
-        help="Target Zoho application (currently: books)",
+        choices=["books", "crm"],
+        help="Target Zoho application (books, crm)",
     )
     parser.add_argument(
         "--target",
         required=True,
-        choices=["expense-receipt", "bill-attachment"],
+        choices=["expense-receipt", "bill-attachment", "record-attachment"],
         help="Target upload entity type",
     )
     parser.add_argument(
         "--id",
         required=True,
-        help="ID of the target record (e.g. expense ID or bill ID)",
+        help="ID of the target record (e.g. expense ID, bill ID, or CRM record ID)",
     )
     parser.add_argument(
         "--file",
         required=True,
         help="Path to the local file to upload",
+    )
+    parser.add_argument(
+        "--module",
+        required=False,
+        default=None,
+        help="Zoho CRM module name (required for CRM, e.g. Leads, Contacts, Deals, Accounts)",
     )
     parser.add_argument(
         "--organization-id",
@@ -111,13 +119,36 @@ def main(cli_args=None) -> int:
         return 1
 
     org_id = args.organization_id or config.get("books_org_id")
-    if not org_id and args.app == "books":
-        print(
-            "Error: Organization ID is required for Zoho Books. "
-            "Pass --organization-id or set ZOHO_BRIDGE_BOOKS_ORG_ID.",
-            file=sys.stderr,
-        )
-        return 1
+    if args.app == "books":
+        if args.target not in ("expense-receipt", "bill-attachment"):
+            print(
+                f"Error: Invalid target '{args.target}' for Books. "
+                "Supported targets: expense-receipt, bill-attachment.",
+                file=sys.stderr,
+            )
+            return 1
+        if not org_id:
+            print(
+                "Error: Organization ID is required for Zoho Books. "
+                "Pass --organization-id or set ZOHO_BRIDGE_BOOKS_ORG_ID.",
+                file=sys.stderr,
+            )
+            return 1
+    elif args.app == "crm":
+        if args.target != "record-attachment":
+            print(
+                f"Error: Invalid target '{args.target}' for CRM. "
+                "Supported targets: record-attachment.",
+                file=sys.stderr,
+            )
+            return 1
+        if not args.module:
+            print(
+                "Error: --module is required for Zoho CRM "
+                "(e.g. Leads, Contacts, Deals, Accounts).",
+                file=sys.stderr,
+            )
+            return 1
 
     dc = config["dc"]
 
@@ -135,7 +166,8 @@ def main(cli_args=None) -> int:
         return 1
 
     # 5. Upload file
-    print(f"Uploading {file_path.name} to {args.app} ({args.target} {args.id})...")
+    target_desc = f"{args.module} {args.id}" if args.app == "crm" else f"{args.target} {args.id}"
+    print(f"Uploading {file_path.name} to {args.app} ({target_desc})...")
     try:
         if args.app == "books" and args.target == "expense-receipt":
             res = upload_books_expense_receipt(
@@ -153,6 +185,14 @@ def main(cli_args=None) -> int:
                 bill_id=args.id,
                 file_path=str(file_path),
             )
+        elif args.app == "crm" and args.target == "record-attachment":
+            res = upload_crm_record_attachment(
+                dc=dc,
+                access_token=access_token,
+                module=args.module,
+                record_id=args.id,
+                file_path=str(file_path),
+            )
         else:
             print(f"Error: Unsupported app/target: {args.app}/{args.target}", file=sys.stderr)
             return 1
@@ -160,7 +200,15 @@ def main(cli_args=None) -> int:
         print(f"Upload failed: {exc}", file=sys.stderr)
         return 1
 
-    upload_msg = res.get("message", "Upload request completed.")
+    upload_msg = "Upload request completed."
+    if isinstance(res, dict):
+        if res.get("message"):
+            upload_msg = str(res["message"])
+        elif "data" in res and isinstance(res["data"], list) and res["data"]:
+            first = res["data"][0]
+            if isinstance(first, dict) and first.get("message"):
+                upload_msg = str(first["message"])
+
     print(f"Upload response: {upload_msg}")
 
     # 6. Mandatory read-back verification
@@ -180,6 +228,26 @@ def main(cli_args=None) -> int:
             organization_id=org_id,
             bill_id=args.id,
             expected_sha256=local_sha,
+        )
+    elif args.app == "crm" and args.target == "record-attachment":
+        uploaded_attachment_id = None
+        if isinstance(res, dict) and "data" in res and isinstance(res["data"], list) and res["data"]:
+            first_item = res["data"][0]
+            if isinstance(first_item, dict):
+                details = first_item.get("details")
+                if isinstance(details, dict):
+                    uploaded_attachment_id = details.get("id")
+                if not uploaded_attachment_id:
+                    uploaded_attachment_id = first_item.get("id")
+
+        verified, vmsg = verify_crm_record_attachment(
+            dc=dc,
+            access_token=access_token,
+            module=args.module,
+            record_id=args.id,
+            file_name=file_path.name,
+            expected_sha256=local_sha,
+            attachment_id=str(uploaded_attachment_id) if uploaded_attachment_id else None,
         )
     else:
         verified, vmsg = False, "Unsupported target for verification."
