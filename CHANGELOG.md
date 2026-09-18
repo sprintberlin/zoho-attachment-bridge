@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] — 2026-09-18
 
 ### Added
+- Projects task and comment attachment adapter with `--app projects --target task-attachment|comment-attachment`,
+  resolving [issue #4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4).
+- Multipart task upload using `POST https://projectsapi.<dc>/restapi/portal/{portal_id}/projects/{project_id}/tasks/{task_id}/attachments/`
+  with form field `uploaddoc` and mandatory SHA-256 verification against the task attachment list and download URL.
+- Multipart comment upload using `POST https://projectsapi.<dc>/restapi/portal/{portal_id}/projects/{project_id}/tasks/{task_id}/comments/`
+  with form fields `uploaddoc` and `content`.
+- Mock-only unit test coverage (95 tests total) covering Projects URL composition, numeric ID validation,
+  extension validation, multipart requests, and SHA-256 verification.
 
 - Books organization and Projects portal discovery via `scripts/discover.py`, resolving [issue #10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10). The helpers call `GET /books/v3/organizations` and `GET /api/v3/portals`, print IDs plus non-secret metadata, and support named profiles and JSON output.
 - Multi-host Self Client deployment guidance with per-host refresh-token isolation, named-profile separation, password-manager transfer rules, and the 20-active-refresh-token limit, resolving [issue #6](https://github.com/sprintberlin/zoho-attachment-bridge/issues/6).

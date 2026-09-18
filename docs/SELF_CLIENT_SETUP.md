@@ -114,6 +114,44 @@ GET  https://www.zohoapis.<dc>/crm/v8/{module}/{record_id}/Attachments?fields=id
 GET  https://www.zohoapis.<dc>/crm/v8/{module}/{record_id}/Attachments/{attachment_id}
 ```
 
+### Exact scope string for Projects task and comment attachments
+
+Projects task and comment attachments plus SHA-256 read-back require this complete, comma-separated scope string:
+
+```text
+ZohoProjects.tasks.READ,ZohoProjects.tasks.CREATE,ZohoPC.files.ALL
+```
+
+| Scope | Why it is required |
+|---|---|
+| `ZohoProjects.tasks.READ` | List task attachments and comments for SHA-256 read-back |
+| `ZohoProjects.tasks.CREATE` | Post a new task comment when uploading via `--target comment-attachment` |
+| `ZohoPC.files.ALL` | Store the multipart `uploaddoc` file on `POST .../tasks/{task_id}/attachments/` |
+
+Optional discovery:
+
+```text
+ZohoProjects.portals.READ
+```
+
+Used by `python3 scripts/discover.py projects-portals`. Not required when `--portal-id` or `ZOHO_BRIDGE_PROJECTS_PORTAL_ID` is already known.
+
+File uploads stay on the documented `/restapi/` endpoints. Projects v3 documents JSON task create/update only, not binary attachments.
+
+Projects endpoint sequence:
+
+```text
+POST https://projectsapi.<dc>/restapi/portal/{portal_id}/projects/{project_id}/tasks/{task_id}/attachments/
+     multipart: uploaddoc
+POST https://projectsapi.<dc>/restapi/portal/{portal_id}/projects/{project_id}/tasks/{task_id}/comments/
+     multipart: uploaddoc, content
+GET  https://projectsapi.<dc>/restapi/portal/{portal_id}/projects/{project_id}/tasks/{task_id}/attachments/
+GET  https://projectsapi.<dc>/restapi/portal/{portal_id}/projects/{project_id}/tasks/{task_id}/comments/
+GET  <DOWNLOAD_URL from attachment metadata>
+```
+
+Source: [Tasks API](https://www.zoho.com/projects/help/rest-api/tasks-api.html).
+
 ### Exact scope string for WorkDrive file uploads and new versions
 
 WorkDrive file upload, new-version upload, and mandatory SHA-256 read-back require this complete, comma-separated scope string:
@@ -145,7 +183,7 @@ The following entries are planning notes for later adapters and must be rechecke
 
 | App | Purpose | Expected scope family |
 |---|---|---|
-| Projects | task and comment attachments | app-specific Projects create/read scopes |
+| Inventory | item images and bill attachments | app-specific Inventory create/read scopes |
 
 Read access is part of the bridge contract. The bridge must verify every upload instead of trusting an HTTP status or success message.
 

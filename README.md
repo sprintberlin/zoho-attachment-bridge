@@ -153,6 +153,7 @@ Zoho enforces a different allowlist per endpoint, and the bridge rejects violati
 | `bill-attachment` | gif, png, jpeg, jpg, bmp, pdf |
 | `record-attachment` (CRM) | Zoho publishes no extension allowlist for this endpoint; the bridge requires a filename extension and leaves enforcement to the API |
 | `file-upload`, `new-version` (WorkDrive) | Blocked and allowed extensions are an organization policy (API errors `D9236` / `D9237`); the bridge requires a filename extension and enforces the documented 250 MB limit of the multipart endpoint |
+| `task-attachment`, `comment-attachment` (Projects) | Zoho publishes no extension allowlist; the bridge requires a filename extension and leaves enforcement to the API |
 
 ### File size limits
 
@@ -164,6 +165,7 @@ The bridge rejects oversized files locally before building the multipart body:
 | `bill-attachment` | 5 MB |
 | `record-attachment` | — (configurable) |
 | `file-upload`, `new-version` | 250 MB |
+| `task-attachment`, `comment-attachment` | — (configurable) |
 
 Override per call with `--max-bytes <bytes>` or set `ZOHO_BRIDGE_MAX_BYTES_<TARGET>` (e.g. `ZOHO_BRIDGE_MAX_BYTES_EXPENSE_RECEIPT=10485760`). Named profiles use `ZOHO_BRIDGE_<PROFILE>_MAX_BYTES_<TARGET>`.
 
@@ -270,6 +272,23 @@ python3 scripts/zoho_attach.py \
   --id ly9zm0170fb40015f4e2297a144e2b68cfa68 \
   --filename report.pdf \
   --file ~/documents/report-v2.pdf
+
+# Projects task attachment
+python3 scripts/zoho_attach.py \
+  --app projects \
+  --target task-attachment \
+  --project-id 170876000004921003 \
+  --id 170876000004922138 \
+  --file ~/documents/specification.pdf
+
+# Projects comment attachment
+python3 scripts/zoho_attach.py \
+  --app projects \
+  --target comment-attachment \
+  --project-id 170876000004921003 \
+  --id 170876000004922138 \
+  --comment "Initial review draft" \
+  --file ~/documents/review.pdf
 ```
 
 The `--organization-id` can be omitted if `ZOHO_BRIDGE_BOOKS_ORG_ID` is set in the environment; it applies to Books only. **CRM does not use an organization ID** and requires `--module` (for example `Leads`, `Contacts`, `Deals`, or `Accounts`).
@@ -290,6 +309,14 @@ WorkDrive.files.CREATE,WorkDrive.files.READ
 
 `WorkDrive.files.CREATE` authorizes `POST /workdrive/api/v1/upload`; `WorkDrive.files.READ` authorizes the download used for verification. A Books- or CRM-only token returns `F7007 Invalid OAuth scope` on every WorkDrive call.
 
+For Projects task and comment attachments, create the refresh token with:
+
+```text
+ZohoProjects.tasks.READ,ZohoProjects.tasks.CREATE,ZohoPC.files.ALL
+```
+
+`ZohoProjects.tasks.READ` lists attachments and comments for SHA-256 read-back. `ZohoProjects.tasks.CREATE` posts a comment with `--target comment-attachment`. `ZohoPC.files.ALL` stores the multipart `uploaddoc` file. File uploads stay on the documented `/restapi/` endpoints; Projects v3 documents JSON task create/update only, not binary attachments.
+
 Exit code `0` only after the uploaded file was confirmed present on the record via SHA-256 read-back verification.
 
 ---
@@ -304,7 +331,7 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 | Books / Projects | organization and portal discovery | implemented, unit tests only | [#10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10) |
 | CRM | record attachment | implemented, mocked upload/list/download verification | [#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3) |
 | WorkDrive | file upload, new version | implemented, mocked upload/download verification | [#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9) |
-| Projects | task and comment attachment | planned | [#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4) |
+| Projects | task and comment attachment | implemented, mocked upload/download verification | [#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4) |
 | Inventory | item image, bill attachment | planned | [#8](https://github.com/sprintberlin/zoho-attachment-bridge/issues/8) |
 
 Progress and next work: [`docs/ROADMAP.md`](docs/ROADMAP.md). Open issues: [sprintberlin/zoho-attachment-bridge/issues](https://github.com/sprintberlin/zoho-attachment-bridge/issues).
@@ -335,7 +362,7 @@ Both a new file and a new version use the same upload endpoint. The `override-na
 ## 🔒 Security
 
 - Treat `ZOHO_BRIDGE_REFRESH_TOKEN` like a password. It grants standing API access until revoked. Never commit it, never print it, never paste it into a chat.
-- Request the **narrowest scope** per app. Do not use `ZohoBooks.fullaccess.ALL`. For CRM record attachments, `ZohoCRM.modules.ALL` is additionally needed for the parent module, alongside `ZohoCRM.modules.attachments.CREATE` and `ZohoCRM.modules.attachments.READ`. WorkDrive uploads need `WorkDrive.files.CREATE` and `WorkDrive.files.READ`.
+- Request the **narrowest scope** per app. Do not use `ZohoBooks.fullaccess.ALL`. For CRM record attachments, `ZohoCRM.modules.ALL` is additionally needed for the parent module, alongside `ZohoCRM.modules.attachments.CREATE` and `ZohoCRM.modules.attachments.READ`. WorkDrive uploads need `WorkDrive.files.CREATE` and `WorkDrive.files.READ`. Projects attachments need `ZohoProjects.tasks.READ`, `ZohoProjects.tasks.CREATE`, and `ZohoPC.files.ALL`.
 - WorkDrive resource IDs are opaque strings. Resolve them through the WorkDrive MCP skill and never derive one from a path or file name.
 - Revoke unused Self Clients in the API Console.
 - Uploads are subject to Zoho rate limits and per-plan file size limits. The bridge backs off on HTTP 429. Local file size pre-checks enforce documented limits before upload (Books 7 MB / 5 MB, WorkDrive 250 MB; CRM only when configured) via `--max-bytes` or env vars ([#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2)).

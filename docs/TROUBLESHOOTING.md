@@ -41,6 +41,8 @@ The bridge validates file size locally before building the multipart body:
 | `record-attachment` | — (configurable) | `ZOHO_BRIDGE_MAX_BYTES_RECORD_ATTACHMENT` |
 | `file-upload` | 250 MB | `ZOHO_BRIDGE_MAX_BYTES_FILE_UPLOAD` |
 | `new-version` | 250 MB | `ZOHO_BRIDGE_MAX_BYTES_NEW_VERSION` |
+| `task-attachment` | — (configurable) | `ZOHO_BRIDGE_MAX_BYTES_TASK_ATTACHMENT` |
+| `comment-attachment` | — (configurable) | `ZOHO_BRIDGE_MAX_BYTES_COMMENT_ATTACHMENT` |
 
 You can also pass `--max-bytes <bytes>` on the CLI to override the limit for a single run.
 
@@ -61,6 +63,10 @@ For WorkDrive, allowed and blocked extensions are configured per organization.
 The bridge only requires an extension, then lets WorkDrive enforce the real
 account policy. WorkDrive returns `D9236` when the extension is blocked and
 `D9237` when it is not in the organization's allowed list.
+
+Zoho Projects publishes no extension allowlist for task or comment attachments.
+The bridge only requires a filename extension, then lets the API apply the
+account policy.
 
 ### WorkDrive upload is larger than 250 MB
 

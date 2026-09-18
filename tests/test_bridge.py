@@ -1472,3 +1472,189 @@ class TestDiscoverCli(unittest.TestCase):
             data = json.loads(out)
             self.assertEqual(len(data), 1)
             self.assertEqual(data[0]["portal_id"], "999")
+
+
+class TestProjectsOperationsAndVerification(unittest.TestCase):
+    """Zoho Projects task and comment attachment upload plus SHA-256 read-back."""
+
+    def _temp_file(self, content: bytes = b"Projects binary payload", suffix: str = ".pdf") -> str:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(content)
+            self.addCleanup(lambda p=tmp.name: os.path.exists(p) and os.unlink(p))
+            return tmp.name
+
+    def test_projects_urls_and_id_validation(self):
+        url = bridge.projects_task_attachments_url("eu", "2063927", "170876000004921003", "170876000004922138")
+        self.assertEqual(
+            url,
+            "https://projectsapi.zoho.eu/restapi/portal/2063927/projects/170876000004921003/tasks/170876000004922138/attachments/",
+        )
+        comments = bridge.projects_task_comments_url("com", "1", "2", "3")
+        self.assertEqual(
+            comments,
+            "https://projectsapi.zoho.com/restapi/portal/1/projects/2/tasks/3/comments/",
+        )
+        with self.assertRaises(ValueError):
+            bridge.projects_task_attachments_url("eu", "portal/1", "2", "3")
+
+    def test_projects_accepts_any_extension_but_requires_one(self):
+        for name in ["doc.pdf", "archive.zip", "notes.txt"]:
+            for target in ("task-attachment", "comment-attachment"):
+                self.assertTrue(bridge.validate_file_extension(name, target).startswith("."))
+        with self.assertRaises(ValueError):
+            bridge.validate_file_extension("extensionless", "task-attachment")
+
+    @patch("bridge.api_request")
+    def test_upload_projects_task_attachment_posts_uploaddoc(self, mock_api):
+        mock_api.return_value = (200, json.dumps([{
+            "FILENAME": "spec.pdf",
+            "RESOURCE_ID": "033zqca7d98669ef541348a5d2ded5d44ff3d",
+            "DOWNLOAD_URL": "https://download.zoho.com/paramdownloadservlet?x-service=EX",
+        }]).encode("utf-8"))
+        tmp_path = self._temp_file()
+        response = bridge.upload_projects_task_attachment(
+            dc="eu",
+            access_token="tok",
+            portal_id="2063927",
+            project_id="170876000004921003",
+            task_id="170876000004922138",
+            file_path=tmp_path,
+        )
+        self.assertEqual(response[0]["RESOURCE_ID"], "033zqca7d98669ef541348a5d2ded5d44ff3d")
+        args, kwargs = mock_api.call_args
+        self.assertTrue(args[0].endswith("/attachments/"))
+        self.assertEqual(kwargs["method"], "POST")
+        self.assertIn(b'name="uploaddoc"', kwargs["data"])
+        self.assertIn(b"Projects binary payload", kwargs["data"])
+
+    @patch("bridge.api_request")
+    def test_upload_projects_comment_attachment_posts_content_and_uploaddoc(self, mock_api):
+        mock_api.return_value = (201, json.dumps({
+            "comments": [{"id": 57000001149011, "content": "note"}]
+        }).encode("utf-8"))
+        tmp_path = self._temp_file()
+        response = bridge.upload_projects_comment_attachment(
+            dc="eu",
+            access_token="tok",
+            portal_id="2063927",
+            project_id="170876000004921003",
+            task_id="170876000004922138",
+            file_path=tmp_path,
+            comment="Setup Demo Video",
+        )
+        self.assertEqual(bridge.extract_projects_comment_id(response), "57000001149011")
+        body = mock_api.call_args.kwargs["data"]
+        self.assertIn(b'name="uploaddoc"', body)
+        self.assertIn(b'name="content"', body)
+        self.assertIn(b"Setup Demo Video", body)
+        self.assertTrue(mock_api.call_args.args[0].endswith("/comments/"))
+
+    @patch("bridge.download_projects_attachment", return_value=b"Projects binary payload")
+    @patch("bridge.list_projects_task_attachments")
+    def test_verify_projects_task_attachment_match(self, mock_list, mock_download):
+        mock_list.return_value = [{
+            "resource_id": "res1",
+            "filename": "spec.pdf",
+            "download_url": "https://download.zoho.com/file",
+        }]
+        verified, message = bridge.verify_projects_task_attachment(
+            "eu", "tok", "1", "2", "3", "spec.pdf",
+            bridge.sha256_bytes(b"Projects binary payload"),
+            resource_id="res1",
+        )
+        self.assertTrue(verified)
+        self.assertIn("Verified", message)
+        mock_download.assert_called_once()
+
+    @patch("bridge.list_projects_task_attachments", return_value=[])
+    def test_verify_projects_task_attachment_missing(self, mock_list):
+        verified, message = bridge.verify_projects_task_attachment(
+            "eu", "tok", "1", "2", "3", "missing.pdf", "a" * 64
+        )
+        self.assertFalse(verified)
+        self.assertIn("not found", message)
+
+    @patch("bridge.verify_projects_task_attachment", return_value=(True, "Verified: SHA-256 match"))
+    @patch("bridge.list_projects_task_comments")
+    def test_verify_projects_comment_attachment_requires_comment(self, mock_comments, mock_verify):
+        mock_comments.return_value = [{"id": "57000001149011", "content": "note"}]
+        verified, _ = bridge.verify_projects_comment_attachment(
+            "eu", "tok", "1", "2", "3", "spec.pdf", "a" * 64, comment_id="57000001149011"
+        )
+        self.assertTrue(verified)
+        mock_verify.assert_called_once()
+
+    @patch("bridge.list_projects_task_comments", return_value=[{"id": "other"}])
+    def test_verify_projects_comment_attachment_missing_comment(self, mock_comments):
+        verified, message = bridge.verify_projects_comment_attachment(
+            "eu", "tok", "1", "2", "3", "spec.pdf", "a" * 64, comment_id="57000001149011"
+        )
+        self.assertFalse(verified)
+        self.assertIn("comment was not found", message)
+
+
+class TestCliProjectsAttach(unittest.TestCase):
+    """CLI coverage for --app projects."""
+
+    def test_projects_requires_project_id_before_authentication(self):
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"Projects bytes")
+            tmp_path = tmp.name
+        try:
+            with patch("zoho_attach.load_env") as mock_env,                  patch("zoho_attach.refresh_access_token") as mock_token:
+                mock_env.return_value = {
+                    "client_id": "cid",
+                    "client_secret": "csec",
+                    "refresh_token": "reftok",
+                    "dc": "eu",
+                    "books_org_id": "",
+                    "projects_portal_id": "2063927",
+                }
+                ret = zoho_attach.main([
+                    "--app", "projects",
+                    "--target", "task-attachment",
+                    "--id", "170876000004922138",
+                    "--file", tmp_path,
+                ])
+            self.assertEqual(ret, 1)
+            mock_token.assert_not_called()
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("zoho_attach.verify_projects_task_attachment", return_value=(True, "Verified match"))
+    @patch("zoho_attach.upload_projects_task_attachment", return_value=[{
+        "FILENAME": "spec.pdf",
+        "RESOURCE_ID": "res1",
+        "DOWNLOAD_URL": "https://download.zoho.com/file",
+    }])
+    @patch("zoho_attach.refresh_access_token", return_value="mock_access_token")
+    @patch("zoho_attach.load_env")
+    def test_successful_projects_task_upload(self, mock_env, mock_tok, mock_upload, mock_verify):
+        mock_env.return_value = {
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "reftok",
+            "dc": "eu",
+            "books_org_id": "",
+            "projects_portal_id": "2063927",
+        }
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"Projects document")
+            tmp_path = tmp.name
+        try:
+            ret = zoho_attach.main([
+                "--app", "projects",
+                "--target", "task-attachment",
+                "--id", "170876000004922138",
+                "--project-id", "170876000004921003",
+                "--file", tmp_path,
+            ])
+            self.assertEqual(ret, 0)
+            mock_upload.assert_called_once()
+            kwargs = mock_upload.call_args.kwargs
+            self.assertEqual(kwargs["portal_id"], "2063927")
+            self.assertEqual(kwargs["project_id"], "170876000004921003")
+            self.assertEqual(kwargs["task_id"], "170876000004922138")
+            mock_verify.assert_called_once()
+        finally:
+            os.unlink(tmp_path)

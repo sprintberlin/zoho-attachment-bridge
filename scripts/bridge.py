@@ -92,6 +92,8 @@ _TARGET_LIMIT_ENV: Dict[str, str] = {
     "record-attachment": "ZOHO_BRIDGE_MAX_BYTES_RECORD_ATTACHMENT",
     "file-upload": "ZOHO_BRIDGE_MAX_BYTES_FILE_UPLOAD",
     "new-version": "ZOHO_BRIDGE_MAX_BYTES_NEW_VERSION",
+    "task-attachment": "ZOHO_BRIDGE_MAX_BYTES_TASK_ATTACHMENT",
+    "comment-attachment": "ZOHO_BRIDGE_MAX_BYTES_COMMENT_ATTACHMENT",
 }
 
 _LIMIT_LABELS: Dict[str, str] = {
@@ -296,6 +298,7 @@ def load_env(profile: Optional[str] = None) -> Dict[str, str]:
     refresh_token = _get("REFRESH_TOKEN")
     dc = _get("DC")
     books_org_id = _get("BOOKS_ORG_ID")
+    projects_portal_id = _get("PROJECTS_PORTAL_ID")
 
     missing = []
     if not client_id:
@@ -317,6 +320,7 @@ def load_env(profile: Optional[str] = None) -> Dict[str, str]:
         "refresh_token": refresh_token,
         "dc": dc.lower().strip(),
         "books_org_id": books_org_id or "",
+        "projects_portal_id": projects_portal_id or "",
     }
 
 
@@ -736,6 +740,11 @@ def validate_file_extension(file_path: str, target: str) -> str:
         if not ext:
             raise ValueError("WorkDrive uploads require a filename extension")
         return ext
+    # Zoho Projects task and comment attachments publish no extension allowlist.
+    if target in ("task-attachment", "comment-attachment"):
+        if not ext:
+            raise ValueError("Zoho Projects attachments require a filename extension")
+        return ext
     allowed = allowed_extensions(target)
     if ext not in allowed:
         raise ValueError(
@@ -892,7 +901,7 @@ def api_request(
         return status, body
 
 
-def parse_zoho_response(body: bytes, status: int, action_context: str) -> Dict[str, Any]:
+def parse_zoho_response(body: bytes, status: int, action_context: str) -> Any:
     """Parse and validate JSON response from Zoho API."""
     if status < 400 and (status == 204 or not body.strip()):
         return {}
@@ -1496,3 +1505,319 @@ def list_projects_portals(
                     "project_plan": str(item.get("project_plan") or item.get("plan") or "").strip(),
                 })
     return results
+
+
+# ---------------------------------------------------------------------------
+# Zoho Projects task and comment attachments (Issue #4)
+# ---------------------------------------------------------------------------
+# Official REST docs:
+# https://www.zoho.com/projects/help/rest-api/tasks-api.html
+# Task attachments:
+#   POST /restapi/portal/{portal}/projects/{project}/tasks/{task}/attachments/
+#   GET  /restapi/portal/{portal}/projects/{project}/tasks/{task}/attachments/
+#   multipart field: uploaddoc
+#   scopes: ZohoProjects.tasks.READ + ZohoPC.files.ALL (upload), ZohoPC.files.READ (list)
+# Comment attachments:
+#   POST /restapi/portal/{portal}/projects/{project}/tasks/{task}/comments/
+#   GET  /restapi/portal/{portal}/projects/{project}/tasks/{task}/comments/
+#   multipart fields: content, uploaddoc
+#   scopes: ZohoProjects.tasks.CREATE + ZohoPC.files.CREATE
+
+def validate_projects_id(value: str, label: str) -> str:
+    """Validate a numeric Projects portal, project, task, or comment ID."""
+    return validate_zoho_id(value, label)
+
+
+def projects_task_attachments_url(
+    dc: str, portal_id: str, project_id: str, task_id: str
+) -> str:
+    portal_id = validate_projects_id(portal_id, "Projects portal ID")
+    project_id = validate_projects_id(project_id, "Projects project ID")
+    task_id = validate_projects_id(task_id, "Projects task ID")
+    return (
+        f"{projects_base_url(dc)}/restapi/portal/{portal_id}"
+        f"/projects/{project_id}/tasks/{task_id}/attachments/"
+    )
+
+
+def projects_task_comments_url(
+    dc: str, portal_id: str, project_id: str, task_id: str
+) -> str:
+    portal_id = validate_projects_id(portal_id, "Projects portal ID")
+    project_id = validate_projects_id(project_id, "Projects project ID")
+    task_id = validate_projects_id(task_id, "Projects task ID")
+    return (
+        f"{projects_base_url(dc)}/restapi/portal/{portal_id}"
+        f"/projects/{project_id}/tasks/{task_id}/comments/"
+    )
+
+
+def extract_projects_attachment_metadata(payload: Any) -> List[Dict[str, Any]]:
+    """Normalize Projects attachment list/upload responses to dicts."""
+    items: List[Any]
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        for key in ("attachments", "documents", "data"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                items = value
+                break
+        else:
+            items = [payload]
+    else:
+        items = []
+
+    results: List[Dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        resource_id = str(
+            item.get("RESOURCE_ID")
+            or item.get("resource_id")
+            or item.get("id")
+            or item.get("id_string")
+            or ""
+        ).strip()
+        filename = str(
+            item.get("FILENAME")
+            or item.get("file_name")
+            or item.get("name")
+            or ""
+        ).strip()
+        download_url = str(
+            item.get("DOWNLOAD_URL")
+            or item.get("download_url")
+            or item.get("preview_url")
+            or ""
+        ).strip()
+        if resource_id or filename or download_url:
+            results.append(
+                {
+                    "resource_id": resource_id,
+                    "filename": filename,
+                    "download_url": download_url,
+                    "raw": item,
+                }
+            )
+    return results
+
+
+def upload_projects_task_attachment(
+    dc: str,
+    access_token: str,
+    portal_id: str,
+    project_id: str,
+    task_id: str,
+    file_path: str,
+    max_bytes: Optional[int] = None,
+) -> Any:
+    """
+    Upload a file to a Zoho Projects task.
+    POST .../tasks/{task_id}/attachments/
+    Multipart field: uploaddoc
+    """
+    validate_file_extension(file_path, "task-attachment")
+    validate_file_size(file_path, "task-attachment", override_bytes=max_bytes)
+    body, content_type = build_multipart_body(file_path, field_name="uploaddoc")
+    url = projects_task_attachments_url(dc, portal_id, project_id, task_id)
+    status, resp_bytes = api_request(
+        url, access_token, data=body, content_type=content_type, method="POST"
+    )
+    return parse_zoho_response(resp_bytes, status, "Projects task attachment upload")
+
+
+def list_projects_task_attachments(
+    dc: str,
+    access_token: str,
+    portal_id: str,
+    project_id: str,
+    task_id: str,
+) -> List[Dict[str, Any]]:
+    """GET .../tasks/{task_id}/attachments/"""
+    url = projects_task_attachments_url(dc, portal_id, project_id, task_id)
+    status, resp_bytes = api_request(url, access_token, method="GET")
+    payload = parse_zoho_response(resp_bytes, status, "list Projects task attachments")
+    return extract_projects_attachment_metadata(payload)
+
+
+def download_projects_attachment(
+    access_token: str,
+    download_url: str,
+) -> bytes:
+    """Download a Projects attachment from the documented DOWNLOAD_URL."""
+    if not download_url.startswith("https://"):
+        raise ValueError("Projects download URL must be an https URL from the API response")
+    status, body = api_request(download_url, access_token, method="GET")
+    if status >= 400:
+        err_text = body.decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"Failed to download Projects attachment: HTTP {status} — {err_text}"
+        )
+    return body
+
+
+def verify_projects_task_attachment(
+    dc: str,
+    access_token: str,
+    portal_id: str,
+    project_id: str,
+    task_id: str,
+    file_name: str,
+    expected_sha256: str,
+    resource_id: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """List the task attachments, download the matching file, compare SHA-256."""
+    try:
+        attachments = list_projects_task_attachments(
+            dc, access_token, portal_id, project_id, task_id
+        )
+    except Exception as exc:
+        return False, f"Verification failed: unable to list Projects task attachments ({exc})"
+
+    matches = attachments
+    if resource_id:
+        matches = [item for item in attachments if item.get("resource_id") == resource_id]
+        if not matches:
+            return False, (
+                "Verification failed: newly uploaded Projects attachment was not "
+                "found in the task attachment list."
+            )
+    else:
+        matches = [item for item in attachments if item.get("filename") == file_name]
+        if not matches:
+            return False, f"Verification failed: attachment '{file_name}' not found on the task"
+        if len(matches) > 1:
+            return False, (
+                "Verification failed: multiple Projects attachments share this filename. "
+                "Re-list the task before assuming which file was uploaded."
+            )
+
+    download_url = matches[0].get("download_url") or ""
+    if not download_url:
+        return False, "Verification failed: Projects attachment list did not include DOWNLOAD_URL"
+
+    try:
+        downloaded = download_projects_attachment(access_token, download_url)
+    except Exception as exc:
+        return False, f"Verification failed: unable to read back Projects attachment ({exc})"
+
+    downloaded_sha256 = sha256_bytes(downloaded)
+    if downloaded_sha256 == expected_sha256:
+        return True, f"Verified: SHA-256 match ({downloaded_sha256})"
+    return False, (
+        f"Verification failed: SHA-256 mismatch. "
+        f"Expected {expected_sha256}, got {downloaded_sha256}"
+    )
+
+
+def upload_projects_comment_attachment(
+    dc: str,
+    access_token: str,
+    portal_id: str,
+    project_id: str,
+    task_id: str,
+    file_path: str,
+    comment: str = "Attachment uploaded by zoho-attachment-bridge",
+    max_bytes: Optional[int] = None,
+) -> Any:
+    """
+    Upload a file as part of a new task comment.
+    POST .../tasks/{task_id}/comments/
+    Multipart fields: content, uploaddoc
+    """
+    validate_file_extension(file_path, "comment-attachment")
+    validate_file_size(file_path, "comment-attachment", override_bytes=max_bytes)
+    extra_fields = {"content": comment}
+    body, content_type = build_multipart_body(
+        file_path, field_name="uploaddoc", extra_fields=extra_fields
+    )
+    url = projects_task_comments_url(dc, portal_id, project_id, task_id)
+    status, resp_bytes = api_request(
+        url, access_token, data=body, content_type=content_type, method="POST"
+    )
+    return parse_zoho_response(resp_bytes, status, "Projects comment attachment upload")
+
+
+def list_projects_task_comments(
+    dc: str,
+    access_token: str,
+    portal_id: str,
+    project_id: str,
+    task_id: str,
+) -> List[Dict[str, Any]]:
+    """GET .../tasks/{task_id}/comments/"""
+    url = projects_task_comments_url(dc, portal_id, project_id, task_id)
+    status, resp_bytes = api_request(url, access_token, method="GET")
+    payload = parse_zoho_response(resp_bytes, status, "list Projects task comments")
+    if isinstance(payload, dict) and isinstance(payload.get("comments"), list):
+        return [item for item in payload["comments"] if isinstance(item, dict)]
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    return []
+
+
+def extract_projects_comment_id(payload: Any) -> Optional[str]:
+    comments: List[Any]
+    if isinstance(payload, dict) and isinstance(payload.get("comments"), list):
+        comments = payload["comments"]
+    elif isinstance(payload, list):
+        comments = payload
+    elif isinstance(payload, dict):
+        comments = [payload]
+    else:
+        comments = []
+    for item in comments:
+        if isinstance(item, dict):
+            value = item.get("id_string") or item.get("id")
+            if value is not None:
+                return str(value)
+    return None
+
+
+def verify_projects_comment_attachment(
+    dc: str,
+    access_token: str,
+    portal_id: str,
+    project_id: str,
+    task_id: str,
+    file_name: str,
+    expected_sha256: str,
+    comment_id: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """
+    Comments do not have a dedicated attachment GET. After upload, list comments
+    to confirm the comment exists, then verify the file against the task
+    attachment list (Projects stores comment files as task documents).
+    """
+    try:
+        comments = list_projects_task_comments(
+            dc, access_token, portal_id, project_id, task_id
+        )
+    except Exception as exc:
+        return False, f"Verification failed: unable to list Projects comments ({exc})"
+
+    if comment_id:
+        found = False
+        for item in comments:
+            cid = str(item.get("id_string") or item.get("id") or "")
+            if cid == str(comment_id):
+                found = True
+                break
+        if not found:
+            return False, (
+                "Verification failed: newly created Projects comment was not found "
+                "in the task comment list."
+            )
+    elif not comments:
+        return False, "Verification failed: no comments found on the task after upload"
+
+    return verify_projects_task_attachment(
+        dc,
+        access_token,
+        portal_id,
+        project_id,
+        task_id,
+        file_name,
+        expected_sha256,
+    )

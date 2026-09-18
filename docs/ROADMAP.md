@@ -21,7 +21,7 @@ Completed. Repository, configuration contract, MCP failure documentation, Self C
 ## 0.3.0 — CRM and Projects
 
 - [x] CRM record attachments (`POST /crm/v8/{module}/{record_id}/Attachments`) — mocked upload/list/download SHA-256 verification ([#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3))
-- [ ] Projects task and comment attachments — [#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4)
+- [x] Projects task and comment attachments (`POST /restapi/portal/{portal}/projects/{project}/tasks/{task}/attachments/` and `/comments/`) — mocked upload/list/download SHA-256 verification ([#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4))
 - [x] Organization and portal resolution helpers — [#10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10)
 
 ## 0.4.0 — Inventory and WorkDrive

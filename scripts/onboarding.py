@@ -136,6 +136,10 @@ def main(cli_args=None) -> int:
     print("  ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachments.READ")
     print("Required scopes for WorkDrive uploads and new versions:")
     print("  WorkDrive.files.CREATE,WorkDrive.files.READ")
+    print("Required scopes for Projects task/comment attachments:")
+    print("  ZohoProjects.tasks.READ,ZohoProjects.tasks.CREATE,ZohoPC.files.ALL")
+    print("Optional discovery scopes:")
+    print("  ZohoBooks.settings.READ,ZohoProjects.portals.READ")
     print("Scopes are fixed when the refresh token is created; include every app you need.")
     try:
         grant_code = read_grant_code(args)

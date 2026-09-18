@@ -39,13 +39,19 @@ from bridge import (
     sha256_file,
     upload_books_bill_attachment,
     upload_books_expense_receipt,
+    extract_projects_attachment_metadata,
+    extract_projects_comment_id,
     upload_crm_record_attachment,
+    upload_projects_comment_attachment,
+    upload_projects_task_attachment,
     upload_workdrive_file,
     validate_file_extension,
     validate_file_size,
     verify_books_bill_attachment,
     verify_books_expense_receipt,
     verify_crm_record_attachment,
+    verify_projects_comment_attachment,
+    verify_projects_task_attachment,
     verify_workdrive_file,
 )
 
@@ -57,8 +63,8 @@ def parse_args(args=None) -> argparse.Namespace:
     parser.add_argument(
         "--app",
         required=True,
-        choices=["books", "crm", "workdrive"],
-        help="Target Zoho application (books, crm, workdrive)",
+        choices=["books", "crm", "workdrive", "projects"],
+        help="Target Zoho application (books, crm, workdrive, projects)",
     )
     parser.add_argument(
         "--target",
@@ -69,6 +75,8 @@ def parse_args(args=None) -> argparse.Namespace:
             "record-attachment",
             "file-upload",
             "new-version",
+            "task-attachment",
+            "comment-attachment",
         ],
         help="Target upload entity type",
     )
@@ -76,8 +84,8 @@ def parse_args(args=None) -> argparse.Namespace:
         "--id",
         required=True,
         help=(
-            "ID of the target record (expense ID, bill ID, CRM record ID, or the "
-            "WorkDrive destination folder ID)"
+            "ID of the target record (expense ID, bill ID, CRM record ID, "
+            "WorkDrive destination folder ID, or Projects task ID)"
         ),
     )
     parser.add_argument(
@@ -90,6 +98,24 @@ def parse_args(args=None) -> argparse.Namespace:
         required=False,
         default=None,
         help="Zoho CRM module name (required for CRM, e.g. Leads, Contacts, Deals, Accounts)",
+    )
+    parser.add_argument(
+        "--portal-id",
+        required=False,
+        default=None,
+        help="Zoho Projects portal ID (defaults to ZOHO_BRIDGE_PROJECTS_PORTAL_ID env var)",
+    )
+    parser.add_argument(
+        "--project-id",
+        required=False,
+        default=None,
+        help="Zoho Projects project ID (required for --app projects)",
+    )
+    parser.add_argument(
+        "--comment",
+        required=False,
+        default="Attachment uploaded by zoho-attachment-bridge",
+        help="Optional comment text for --target comment-attachment",
     )
     parser.add_argument(
         "--organization-id",
@@ -207,6 +233,28 @@ def main(cli_args=None) -> int:
                 file=sys.stderr,
             )
             return 1
+    elif args.app == "projects":
+        if args.target not in ("task-attachment", "comment-attachment"):
+            print(
+                f"Error: Invalid target '{args.target}' for Projects. "
+                "Supported targets: task-attachment, comment-attachment.",
+                file=sys.stderr,
+            )
+            return 1
+        portal_id = args.portal_id or config.get("projects_portal_id")
+        if not portal_id:
+            print(
+                "Error: Portal ID is required for Zoho Projects. "
+                "Pass --portal-id or set ZOHO_BRIDGE_PROJECTS_PORTAL_ID.",
+                file=sys.stderr,
+            )
+            return 1
+        if not args.project_id:
+            print(
+                "Error: --project-id is required for Zoho Projects.",
+                file=sys.stderr,
+            )
+            return 1
 
     dc = config["dc"]
 
@@ -228,6 +276,8 @@ def main(cli_args=None) -> int:
         target_desc = f"{args.module} {args.id}"
     elif args.app == "workdrive":
         target_desc = f"folder {args.id}"
+    elif args.app == "projects":
+        target_desc = f"{args.target} (project {args.project_id}, task {args.id})"
     else:
         target_desc = f"{args.target} {args.id}"
     print(f"Uploading {file_path.name} to {args.app} ({target_desc})...")
@@ -267,6 +317,29 @@ def main(cli_args=None) -> int:
                 file_path=str(file_path),
                 filename=args.filename,
                 override_name_exist=(args.target == "new-version"),
+                max_bytes=effective_max_bytes,
+            )
+        elif args.app == "projects" and args.target == "task-attachment":
+            portal_id = args.portal_id or config.get("projects_portal_id")
+            res = upload_projects_task_attachment(
+                dc=dc,
+                access_token=access_token,
+                portal_id=portal_id,
+                project_id=args.project_id,
+                task_id=args.id,
+                file_path=str(file_path),
+                max_bytes=effective_max_bytes,
+            )
+        elif args.app == "projects" and args.target == "comment-attachment":
+            portal_id = args.portal_id or config.get("projects_portal_id")
+            res = upload_projects_comment_attachment(
+                dc=dc,
+                access_token=access_token,
+                portal_id=portal_id,
+                project_id=args.project_id,
+                task_id=args.id,
+                file_path=str(file_path),
+                comment=args.comment,
                 max_bytes=effective_max_bytes,
             )
         else:
@@ -343,6 +416,33 @@ def main(cli_args=None) -> int:
                 resource_id=resource_id,
                 expected_sha256=local_sha,
             )
+    elif args.app == "projects" and args.target == "task-attachment":
+        portal_id = args.portal_id or config.get("projects_portal_id")
+        meta = extract_projects_attachment_metadata(res)
+        rid = meta[0].get("resource_id") if meta else None
+        verified, vmsg = verify_projects_task_attachment(
+            dc=dc,
+            access_token=access_token,
+            portal_id=portal_id,
+            project_id=args.project_id,
+            task_id=args.id,
+            file_name=file_path.name,
+            expected_sha256=local_sha,
+            resource_id=rid,
+        )
+    elif args.app == "projects" and args.target == "comment-attachment":
+        portal_id = args.portal_id or config.get("projects_portal_id")
+        cid = extract_projects_comment_id(res)
+        verified, vmsg = verify_projects_comment_attachment(
+            dc=dc,
+            access_token=access_token,
+            portal_id=portal_id,
+            project_id=args.project_id,
+            task_id=args.id,
+            file_name=file_path.name,
+            expected_sha256=local_sha,
+            comment_id=cid,
+        )
     else:
         verified, vmsg = False, "Unsupported target for verification."
 
