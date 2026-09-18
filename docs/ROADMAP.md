@@ -26,8 +26,10 @@ Completed. Repository, configuration contract, MCP failure documentation, Self C
 
 ## 0.4.0 — Inventory and WorkDrive
 
+Companion MCP skill: [openclaw-zoho-workdrive-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-workdrive-mcp-skill) (resolves teams, team folders, folders, and resource IDs via MCP before uploads).
+
 - [ ] Inventory item images and bill attachments — [#8](https://github.com/sprintberlin/zoho-attachment-bridge/issues/8)
-- [ ] WorkDrive file upload and new version — [#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9)
+- [ ] WorkDrive file upload and new version (`POST /files` with multipart `content`) — [#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9)
 
 ## 1.0.0 — release
 

@@ -17,10 +17,15 @@ Uploads binary files to Zoho when MCP cannot. Sits next to a Zoho MCP server: MC
 | Read records, list attachments, update fields | Zoho MCP |
 | Attach PDF, image, receipt, any binary file | This skill |
 | MCP upload returned `success` with empty array | This skill |
+| Upload a file into a WorkDrive folder or add a new version | This skill, after resolving the folder through MCP |
+
+Companion MCP skills resolve records and resource IDs before an upload. For WorkDrive, use [openclaw-zoho-workdrive-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-workdrive-mcp-skill) to find the team, team folder, folder, or file ID, then hand the bytes to this skill.
 
 ## Why MCP fails
 
 Zoho MCP exposes upload actions whose schema declares `format: "binary"`, but the server does not build a `multipart/form-data` request. Binary parameters are mapped into query strings and dropped.
+
+Zoho itself appears to know: the WorkDrive MCP tools `Upload File` and `Upload New Version` still declare `format: "binary"`, but their descriptions were narrowed to "text-format file only".
 
 Observed failure modes:
 
@@ -129,9 +134,11 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 | CRM | record attachment | implemented, mocked upload/list/download verification |
 | Projects | task and comment attachment | planned |
 | Inventory | item image, bill attachment | planned |
-| WorkDrive | file upload, new version | planned |
+| WorkDrive | file upload, new version | planned, [#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9) |
 
 Next work: `docs/ROADMAP.md` and the issue tracker.
+
+Until the WorkDrive adapter lands, do not promise a working WorkDrive upload. Resolve the destination folder through the WorkDrive MCP skill, then either wait for the adapter or perform a direct REST `multipart/form-data` upload and verify it by re-listing the folder.
 
 ## Safety
 

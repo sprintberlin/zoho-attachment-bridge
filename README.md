@@ -251,6 +251,18 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 
 Progress and next work: [`docs/ROADMAP.md`](docs/ROADMAP.md). Open issues: [sprintberlin/zoho-attachment-bridge/issues](https://github.com/sprintberlin/zoho-attachment-bridge/issues).
 
+### Companion MCP skills
+
+This bridge only moves bytes. Record lookup, navigation, and metadata stay with the matching Zoho MCP skill, which resolves the target ID before an upload:
+
+| Zoho app | Companion skill |
+|---|---|
+| WorkDrive | [openclaw-zoho-workdrive-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-workdrive-mcp-skill) |
+| CRM | [openclaw-zoho-crm-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-crm-mcp-skill) |
+| Books | [openclaw-zoho-books-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-books-mcp-skill) |
+
+Typical WorkDrive split: resolve the destination folder ID with the WorkDrive MCP skill, upload the bytes here, then read the file back and create share links over MCP again.
+
 ---
 
 ## 🔒 Security
