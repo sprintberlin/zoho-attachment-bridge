@@ -69,6 +69,40 @@ WORKDRIVE_DOWNLOAD_DC_MAP: Dict[str, str] = {
 # https://www.zoho.com/workdrive/developer/docs/api/v1/upload-file.html
 WORKDRIVE_MAX_UPLOAD_BYTES: int = 250 * 1024 * 1024
 
+# Documented per-target upload size limits. Override with
+# ZOHO_BRIDGE_MAX_BYTES_<TARGET> where TARGET uses underscores
+# (EXPENSE_RECEIPT, BILL_ATTACHMENT, RECORD_ATTACHMENT, FILE_UPLOAD,
+# NEW_VERSION).
+# Expense receipts: Zoho Books Welcome Guide, "Maximum file size allowed is 7MB"
+#   https://www.zoho.com/us/books/welcome-guide.html#record-expenses
+# Bill attachments: Zoho Books Help, "a maximum of 5 files, each of 5 MB"
+#   https://www.zoho.com/us/books/help/bills/other-actions.html#attach-files-to-bill
+# CRM record attachments: Zoho CRM v8 Files API, "maximum size of each file is 20MB"
+#   https://www.zoho.com/crm/developer/docs/api/v8/upload-files-to-zfs.html
+DEFAULT_MAX_UPLOAD_BYTES: Dict[str, int] = {
+    "expense-receipt": 7 * 1024 * 1024,
+    "bill-attachment": 5 * 1024 * 1024,
+    "record-attachment": 20 * 1024 * 1024,
+    "file-upload": WORKDRIVE_MAX_UPLOAD_BYTES,
+    "new-version": WORKDRIVE_MAX_UPLOAD_BYTES,
+}
+
+_TARGET_LIMIT_ENV: Dict[str, str] = {
+    "expense-receipt": "ZOHO_BRIDGE_MAX_BYTES_EXPENSE_RECEIPT",
+    "bill-attachment": "ZOHO_BRIDGE_MAX_BYTES_BILL_ATTACHMENT",
+    "record-attachment": "ZOHO_BRIDGE_MAX_BYTES_RECORD_ATTACHMENT",
+    "file-upload": "ZOHO_BRIDGE_MAX_BYTES_FILE_UPLOAD",
+    "new-version": "ZOHO_BRIDGE_MAX_BYTES_NEW_VERSION",
+}
+
+_LIMIT_LABELS: Dict[str, str] = {
+    "expense-receipt": "7 MB",
+    "bill-attachment": "5 MB",
+    "record-attachment": "20 MB",
+    "file-upload": "250 MB",
+    "new-version": "250 MB",
+}
+
 # ---------------------------------------------------------------------------
 # Extension allowlists per target
 # ---------------------------------------------------------------------------
@@ -603,6 +637,78 @@ def allowed_extensions(target: str) -> Set[str]:
     return _TARGET_EXTENSIONS[target]
 
 
+def get_max_upload_bytes(
+    target: str,
+    override_bytes: Optional[int] = None,
+    profile: Optional[str] = None,
+) -> int:
+    """
+    Return the maximum upload size in bytes for a target.
+    Precedence:
+      1. Explicit override_bytes parameter (e.g. from CLI flag)
+      2. Environment variable ZOHO_BRIDGE_[<PROFILE>_]MAX_BYTES_<TARGET>
+      3. Global environment variable ZOHO_BRIDGE_MAX_UPLOAD_BYTES
+      4. Documented default per target (DEFAULT_MAX_UPLOAD_BYTES)
+    """
+    if override_bytes is not None:
+        if override_bytes <= 0:
+            raise ValueError(f"Upload size limit must be positive, got {override_bytes}")
+        return override_bytes
+
+    if target not in DEFAULT_MAX_UPLOAD_BYTES:
+        raise ValueError(
+            f"Unknown target '{target}'. "
+            f"Valid targets: {', '.join(sorted(DEFAULT_MAX_UPLOAD_BYTES.keys()))}"
+        )
+
+    env_suffix = _TARGET_LIMIT_ENV[target].removeprefix("ZOHO_BRIDGE_")
+    candidates = []
+    if profile:
+        candidates.append(f"ZOHO_BRIDGE_{profile.upper()}_{env_suffix}")
+    candidates.append(f"ZOHO_BRIDGE_{env_suffix}")
+    if profile:
+        candidates.append(f"ZOHO_BRIDGE_{profile.upper()}_MAX_UPLOAD_BYTES")
+    candidates.append("ZOHO_BRIDGE_MAX_UPLOAD_BYTES")
+
+    for var in candidates:
+        val = os.environ.get(var)
+        if val:
+            try:
+                parsed = int(val.strip())
+                if parsed <= 0:
+                    raise ValueError(f"Limit in {var} must be positive, got {parsed}")
+                return parsed
+            except ValueError as exc:
+                raise ValueError(f"Invalid integer in environment variable {var}: '{val}'") from exc
+
+    return DEFAULT_MAX_UPLOAD_BYTES[target]
+
+
+def validate_file_size(
+    file_path: str,
+    target: str,
+    override_bytes: Optional[int] = None,
+    profile: Optional[str] = None,
+) -> int:
+    """
+    Validate that the local file size does not exceed the limit for target.
+    Returns the file size in bytes on success, raises ValueError on violation.
+    """
+    size = os.path.getsize(file_path)
+    limit = get_max_upload_bytes(target, override_bytes=override_bytes, profile=profile)
+    if size > limit:
+        label = _LIMIT_LABELS.get(target, f"{limit} bytes")
+        if limit != DEFAULT_MAX_UPLOAD_BYTES.get(target):
+            limit_desc = f"{limit} bytes (configured limit)"
+        else:
+            limit_desc = f"{limit} bytes ({label} limit)"
+        raise ValueError(
+            f"File '{Path(file_path).name}' is {size} bytes, which exceeds the "
+            f"maximum upload size for '{target}' of {limit_desc}."
+        )
+    return size
+
+
 def validate_file_extension(file_path: str, target: str) -> str:
     """
     Validate that the file's extension is in the target allowlist.
@@ -868,6 +974,7 @@ def upload_books_expense_receipt(
     POST /api/v3/expenses/{expense_id}/receipt?organization_id={org_id}
     """
     validate_file_extension(file_path, "expense-receipt")
+    validate_file_size(file_path, "expense-receipt")
     body, content_type = build_multipart_body(file_path, field_name="receipt")
     url = (
         f"{books_base_url(dc)}/expenses/{expense_id}/receipt"
@@ -891,6 +998,7 @@ def upload_books_bill_attachment(
     POST /api/v3/bills/{bill_id}/attachment?organization_id={org_id}
     """
     validate_file_extension(file_path, "bill-attachment")
+    validate_file_size(file_path, "bill-attachment")
     body, content_type = build_multipart_body(file_path, field_name="attachment")
     url = (
         f"{books_base_url(dc)}/bills/{bill_id}/attachment"
@@ -1017,6 +1125,7 @@ def upload_crm_record_attachment(
     Multipart field name: 'file'
     """
     validate_file_extension(file_path, "record-attachment")
+    validate_file_size(file_path, "record-attachment")
     module = validate_crm_module(module)
     record_id = validate_zoho_id(record_id, "CRM record ID")
     body, content_type = build_multipart_body(file_path, field_name="file")
@@ -1169,15 +1278,8 @@ def upload_workdrive_file(
     """
     target = "new-version" if override_name_exist else "file-upload"
     validate_file_extension(file_path, target)
+    validate_file_size(file_path, target)
     parent_id = validate_workdrive_resource_id(parent_id, "WorkDrive parent folder ID")
-
-    size = os.path.getsize(file_path)
-    if size > WORKDRIVE_MAX_UPLOAD_BYTES:
-        raise ValueError(
-            f"File is {size} bytes, above the documented 250 MB limit of the "
-            "WorkDrive multipart upload endpoint. Larger files need the separate "
-            "stream upload endpoint, which this bridge does not implement."
-        )
 
     extra_fields: Dict[str, str] = {
         "parent_id": parent_id,

@@ -35,6 +35,12 @@ Zoho stores each account in one region and the console domain differs per region
 
 These two values are permanent. Store them somewhere safe.
 
+### 🔒 Security rule
+
+**Never paste Client ID, Client Secret, grant codes or refresh tokens into chat channels, emails, or agent-to-agent messages.**
+
+Use a password manager to store and move credentials. When running `scripts/onboarding.py`, secrets are masked on input, and grant codes can be passed via `--grant-code-file <path>` (or `-` for stdin) so they never appear in your shell history.
+
 ---
 
 ## 3. Generate a grant token

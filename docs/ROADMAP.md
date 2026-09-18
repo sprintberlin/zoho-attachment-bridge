@@ -15,7 +15,7 @@ Completed. Repository, configuration contract, MCP failure documentation, Self C
 - [x] SHA-256 read-back verification
 - [x] Persistent access token cache (mode 0600)
 - [x] HTTP 429 backoff
-- [ ] File size pre-check — [#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2)
+- [x] File size pre-check (local rejection before multipart construction, configurable per target) — [#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2)
 - [ ] Live-verify bill attachments — [#1](https://github.com/sprintberlin/zoho-attachment-bridge/issues/1)
 
 ## 0.3.0 — CRM and Projects
@@ -34,7 +34,7 @@ Companion MCP skill: [openclaw-zoho-workdrive-mcp-skill](https://github.com/spri
 ## 1.0.0 — release
 
 - [ ] Named profiles verified on two data centers — [#11](https://github.com/sprintberlin/zoho-attachment-bridge/issues/11)
-- [ ] Safer onboarding (no echoed secrets) — [#5](https://github.com/sprintberlin/zoho-attachment-bridge/issues/5)
+- [x] Safer onboarding (hidden secret entry, grant code file/stdin support, no credentials in chat) — [#5](https://github.com/sprintberlin/zoho-attachment-bridge/issues/5)
 - [ ] Document multi-host Self Client setup — [#6](https://github.com/sprintberlin/zoho-attachment-bridge/issues/6)
 - [ ] ClawHub publication — [#7](https://github.com/sprintberlin/zoho-attachment-bridge/issues/7)
 

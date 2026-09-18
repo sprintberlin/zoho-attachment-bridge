@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Local file size pre-check before multipart construction across all targets, resolving [issue #2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2).
+  Enforces documented defaults (7 MB for Books expense receipts, 5 MB for Books bill attachments,
+  20 MB for CRM record attachments, and 250 MB for WorkDrive multipart uploads). Limits can be
+  overridden via `--max-bytes` or `ZOHO_BRIDGE_[<PROFILE>_]MAX_BYTES_<TARGET>`.
+- Hardened onboarding script with hidden secret input via `getpass`, support for reading the
+  grant code from a file or stdin (`--grant-code-file`), and warnings against sending credentials
+  through chat, email, or agent-to-agent channels, resolving [issue #5](https://github.com/sprintberlin/zoho-attachment-bridge/issues/5).
 - WorkDrive file upload and new version adapter with `--app workdrive --target file-upload|new-version`,
   resolving [issue #9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9).
 - Multipart upload using `POST https://www.zohoapis.<dc>/workdrive/api/v1/upload`

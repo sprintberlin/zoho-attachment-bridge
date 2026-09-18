@@ -161,6 +161,101 @@ class TestSHA256(unittest.TestCase):
                 os.unlink(tmp_path)
 
 
+class TestFileSizeValidation(unittest.TestCase):
+    """Target-specific upload limits are checked before multipart construction."""
+
+    def test_documented_default_limits(self):
+        self.assertEqual(
+            bridge.get_max_upload_bytes("expense-receipt"), 7 * 1024 * 1024
+        )
+        self.assertEqual(
+            bridge.get_max_upload_bytes("bill-attachment"), 5 * 1024 * 1024
+        )
+        self.assertEqual(
+            bridge.get_max_upload_bytes("record-attachment"), 20 * 1024 * 1024
+        )
+        self.assertEqual(
+            bridge.get_max_upload_bytes("file-upload"), 250 * 1024 * 1024
+        )
+
+    def test_target_env_override(self):
+        with patch.dict(
+            os.environ,
+            {"ZOHO_BRIDGE_MAX_BYTES_BILL_ATTACHMENT": "1234"},
+            clear=True,
+        ):
+            self.assertEqual(bridge.get_max_upload_bytes("bill-attachment"), 1234)
+
+    def test_profile_env_override_precedes_default_env(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ZOHO_BRIDGE_MAX_BYTES_EXPENSE_RECEIPT": "2000",
+                "ZOHO_BRIDGE_ACME_MAX_BYTES_EXPENSE_RECEIPT": "1500",
+            },
+            clear=True,
+        ):
+            self.assertEqual(
+                bridge.get_max_upload_bytes("expense-receipt", profile="acme"),
+                1500,
+            )
+
+    def test_explicit_override_precedes_environment(self):
+        with patch.dict(
+            os.environ,
+            {"ZOHO_BRIDGE_MAX_BYTES_BILL_ATTACHMENT": "1234"},
+            clear=True,
+        ):
+            self.assertEqual(
+                bridge.get_max_upload_bytes("bill-attachment", override_bytes=500),
+                500,
+            )
+
+    def test_invalid_env_limit_is_rejected(self):
+        with patch.dict(
+            os.environ,
+            {"ZOHO_BRIDGE_MAX_BYTES_BILL_ATTACHMENT": "not-a-number"},
+            clear=True,
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                bridge.get_max_upload_bytes("bill-attachment")
+        self.assertIn("ZOHO_BRIDGE_MAX_BYTES_BILL_ATTACHMENT", str(ctx.exception))
+
+    def test_oversized_file_is_rejected_with_limit_name(self):
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"123456")
+            tmp_path = tmp.name
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                bridge.validate_file_size(
+                    tmp_path, "bill-attachment", override_bytes=5
+                )
+            self.assertIn("bill-attachment", str(ctx.exception))
+            self.assertIn("configured limit", str(ctx.exception))
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("bridge.build_multipart_body")
+    def test_books_rejection_happens_before_multipart_construction(self, mock_build):
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"tiny")
+            tmp_path = tmp.name
+        try:
+            with patch("bridge.os.path.getsize", return_value=bridge.DEFAULT_MAX_UPLOAD_BYTES["bill-attachment"] + 1):
+                with self.assertRaises(ValueError) as ctx:
+                    bridge.upload_books_bill_attachment(
+                        dc="eu",
+                        access_token="tok",
+                        organization_id="123",
+                        bill_id="456",
+                        file_path=tmp_path,
+                    )
+            self.assertIn("5 MB", str(ctx.exception))
+            mock_build.assert_not_called()
+        finally:
+            os.unlink(tmp_path)
+
+
 class TestMultipartBody(unittest.TestCase):
     """Test multipart/form-data generation."""
 
@@ -1072,16 +1167,18 @@ class TestCliZohoAttach(unittest.TestCase):
 
 
 class TestCliOnboarding(unittest.TestCase):
-    """Test onboarding script."""
+    """Test hardened onboarding input paths."""
 
     @patch("onboarding.update_env_file")
     @patch("onboarding.exchange_grant_token")
+    @patch("onboarding.prompt_secret", return_value="my_client_sec")
     @patch("onboarding.prompt_input")
-    def test_onboarding_flow(self, mock_input, mock_exchange, mock_update):
+    def test_onboarding_flow(
+        self, mock_input, mock_secret, mock_exchange, mock_update
+    ):
         mock_input.side_effect = [
             "eu",               # DC
             "1000.CLIENTID",    # client_id
-            "my_client_sec",    # client_secret
             "1000.GRANTCODE",   # grant_code
             "",                 # profile (default)
         ]
@@ -1094,6 +1191,7 @@ class TestCliOnboarding(unittest.TestCase):
             target_env = str(Path(tmpdir) / ".env")
             ret = onboarding.main(["--env-file", target_env])
             self.assertEqual(ret, 0)
+            mock_secret.assert_called_once_with("Enter Self Client Secret")
             mock_exchange.assert_called_once_with(
                 client_id="1000.CLIENTID",
                 client_secret="my_client_sec",
@@ -1101,6 +1199,34 @@ class TestCliOnboarding(unittest.TestCase):
                 dc="eu",
             )
             mock_update.assert_called_once()
+
+    def test_prompt_secret_uses_getpass(self):
+        with patch("onboarding.getpass.getpass", return_value="hidden-value") as mock_getpass:
+            self.assertEqual(onboarding.prompt_secret("Secret"), "hidden-value")
+            mock_getpass.assert_called_once_with("Secret: ")
+
+    def test_grant_code_file(self):
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
+            tmp.write("1000.FILE_GRANT\n")
+            tmp_path = tmp.name
+        try:
+            args = onboarding.parse_args(["--grant-code-file", tmp_path])
+            self.assertEqual(onboarding.read_grant_code(args), "1000.FILE_GRANT")
+        finally:
+            os.unlink(tmp_path)
+
+    def test_grant_code_stdin(self):
+        args = onboarding.parse_args(["--grant-code-file", "-"])
+        with patch("onboarding.sys.stdin", io.StringIO("1000.STDIN_GRANT\n")):
+            self.assertEqual(onboarding.read_grant_code(args), "1000.STDIN_GRANT")
+
+    def test_grant_code_sources_are_mutually_exclusive(self):
+        args = onboarding.parse_args([
+            "--grant-code", "inline",
+            "--grant-code-file", "grant.txt",
+        ])
+        with self.assertRaises(ValueError):
+            onboarding.read_grant_code(args)
 
 
 if __name__ == "__main__":

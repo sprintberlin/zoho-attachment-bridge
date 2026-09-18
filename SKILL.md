@@ -115,8 +115,8 @@ Manual steps are documented in `docs/SELF_CLIENT_SETUP.md`. Verify the setup wit
 ## Usage
 
 ```bash
-# Expense receipt upload with verification
-python3 scripts/zoho_attach.py --app books --target expense-receipt --id <expense_id> --file <path>
+# Expense receipt upload with verification (enforces 7 MB default limit)
+python3 scripts/zoho_attach.py --app books --target expense-receipt --id <expense_id> --file <path> [--max-bytes <bytes>]
 
 # Bill attachment upload with verification
 python3 scripts/zoho_attach.py --app books --target bill-attachment --id <bill_id> --file <path>

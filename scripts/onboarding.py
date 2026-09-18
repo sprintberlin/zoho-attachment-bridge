@@ -8,11 +8,14 @@ unrelated comments and variables.
 
 Usage:
     python3 scripts/onboarding.py [--env-file .env] [--profile <name>]
+    python3 scripts/onboarding.py --grant-code-file ./grant.txt
+    python3 scripts/onboarding.py --grant-code-file -   # read grant code from stdin
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import sys
 from pathlib import Path
 
@@ -45,6 +48,16 @@ def parse_args(args=None) -> argparse.Namespace:
         default=None,
         help="Optional named profile prefix (e.g. 'acme' -> ZOHO_BRIDGE_ACME_*)",
     )
+    parser.add_argument(
+        "--grant-code",
+        default=None,
+        help="Grant code from the Zoho API Console. Prefer --grant-code-file so the code is not stored in shell history.",
+    )
+    parser.add_argument(
+        "--grant-code-file",
+        default=None,
+        help="Read the grant code from a file, or '-' for stdin. Never paste credentials into chat, email, or agent-to-agent messages.",
+    )
     return parser.parse_args(args)
 
 
@@ -57,6 +70,30 @@ def prompt_input(prompt_text: str, default: str = "") -> str:
     return val if val else default
 
 
+def prompt_secret(prompt_text: str) -> str:
+    """Read a secret without echoing it to the terminal."""
+    try:
+        return getpass.getpass(f"{prompt_text}: ").strip()
+    except (EOFError, getpass.GetPassWarning, Exception):
+        # Non-interactive fallback for tests and environments without a TTY.
+        return input(f"{prompt_text}: ").strip()
+
+
+def read_grant_code(args: argparse.Namespace) -> str:
+    if args.grant_code and args.grant_code_file:
+        raise ValueError("Use either --grant-code or --grant-code-file, not both.")
+    if args.grant_code_file:
+        if args.grant_code_file == "-":
+            return sys.stdin.read().strip()
+        path = Path(args.grant_code_file)
+        if not path.is_file():
+            raise ValueError(f"Grant code file not found: {path}")
+        return path.read_text(encoding="utf-8").strip()
+    if args.grant_code:
+        return args.grant_code.strip()
+    return prompt_input("Enter generated Grant Code (expires in 10 mins)")
+
+
 def main(cli_args=None) -> int:
     args = parse_args(cli_args)
 
@@ -65,6 +102,10 @@ def main(cli_args=None) -> int:
     print("======================================================\n")
     print("This utility exchanges a Self Client grant token for a refresh token")
     print("and safely saves credentials to your environment file.\n")
+    print("Never paste Client ID, Client Secret, grant codes or refresh tokens")
+    print("into chat, email or agent-to-agent messages. Keep them in a password")
+    print("manager or a local 0600 file and pass the grant code with")
+    print("--grant-code-file.\n")
 
     # 1. Data Center
     print(f"Supported Data Centers: {', '.join(sorted(DC_MAP.keys()))}")
@@ -82,7 +123,7 @@ def main(cli_args=None) -> int:
         print("Error: Client ID is required.", file=sys.stderr)
         return 1
 
-    client_secret = prompt_input("Enter Self Client Secret")
+    client_secret = prompt_secret("Enter Self Client Secret")
     if not client_secret:
         print("Error: Client Secret is required.", file=sys.stderr)
         return 1
@@ -96,7 +137,11 @@ def main(cli_args=None) -> int:
     print("Required scopes for WorkDrive uploads and new versions:")
     print("  WorkDrive.files.CREATE,WorkDrive.files.READ")
     print("Scopes are fixed when the refresh token is created; include every app you need.")
-    grant_code = prompt_input("\nEnter generated Grant Code (expires in 10 mins)")
+    try:
+        grant_code = read_grant_code(args)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
     if not grant_code:
         print("Error: Grant Code is required.", file=sys.stderr)
         return 1
@@ -125,7 +170,7 @@ def main(cli_args=None) -> int:
         print("Error: No refresh token returned in Zoho response.", file=sys.stderr)
         return 1
 
-    print("✓ Grant token exchanged successfully.")
+    print("Grant token exchanged successfully.")
 
     # 5. Write to env file
     prefix = "ZOHO_BRIDGE"
@@ -143,14 +188,16 @@ def main(cli_args=None) -> int:
     print(f"\nWriting credentials to {env_path} (mode 0600)...")
     try:
         update_env_file(env_path, updates)
-        print("✓ Credentials stored securely.")
+        print("Credentials stored securely.")
     except Exception as exc:
         print(f"Error saving to env file: {exc}", file=sys.stderr)
         return 1
 
     print("\nOnboarding completed successfully!")
-    print(f"You can now test uploads with:")
-    print(f"  python3 scripts/zoho_attach.py --app books --target expense-receipt --id <EXPENSE_ID> --file <RECEIPT_PATH> --organization-id <ORG_ID>")
+    print("Move the refresh token between machines with a password manager,")
+    print("never through chat or agent-to-agent messages.")
+    print("You can now test uploads with:")
+    print("  python3 scripts/zoho_attach.py --app books --target expense-receipt --id <EXPENSE_ID> --file <RECEIPT_PATH> --organization-id <ORG_ID>")
     return 0
 
 

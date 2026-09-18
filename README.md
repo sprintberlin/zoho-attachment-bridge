@@ -154,6 +154,29 @@ Zoho enforces a different allowlist per endpoint, and the bridge rejects violati
 | `record-attachment` (CRM) | Zoho publishes no extension allowlist for this endpoint; the bridge requires a filename extension and leaves enforcement to the API |
 | `file-upload`, `new-version` (WorkDrive) | Blocked and allowed extensions are an organization policy (API errors `D9236` / `D9237`); the bridge requires a filename extension and enforces the documented 250 MB limit of the multipart endpoint |
 
+### File size limits
+
+The bridge rejects oversized files locally before building the multipart body:
+
+| Target | Documented default |
+|---|---:|
+| `expense-receipt` | 7 MB |
+| `bill-attachment` | 5 MB |
+| `record-attachment` | 20 MB |
+| `file-upload`, `new-version` | 250 MB |
+
+Override per call with `--max-bytes <bytes>` or set `ZOHO_BRIDGE_MAX_BYTES_<TARGET>` (e.g. `ZOHO_BRIDGE_MAX_BYTES_EXPENSE_RECEIPT=10485760`). Named profiles use `ZOHO_BRIDGE_<PROFILE>_MAX_BYTES_<TARGET>`.
+
+### Secure onboarding
+
+```bash
+python3 scripts/onboarding.py --grant-code-file ./grant-code.txt
+# or read the code from stdin
+cat ./grant-code.txt | python3 scripts/onboarding.py --grant-code-file -
+```
+
+The onboarding utility masks secret inputs via `getpass`. Never paste Client ID, Client Secret, grant codes, or refresh tokens into chat, email, or agent-to-agent messages.
+
 ### Example
 
 ```bash
@@ -267,7 +290,7 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 |---|---|---|---|
 | Books | expense receipt | implemented, verified live | — |
 | Books | bill attachment | implemented, unit tests only | [#1](https://github.com/sprintberlin/zoho-attachment-bridge/issues/1) |
-| Books | file size pre-check | not implemented | [#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2) |
+| Books / CRM / WorkDrive | file size pre-check | implemented, configurable per target | [#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2) |
 | CRM | record attachment | implemented, mocked upload/list/download verification | [#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3) |
 | WorkDrive | file upload, new version | implemented, mocked upload/download verification | [#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9) |
 | Projects | task and comment attachment | planned | [#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4) |
@@ -304,7 +327,7 @@ Both a new file and a new version use the same upload endpoint. The `override-na
 - Request the **narrowest scope** per app. Do not use `ZohoBooks.fullaccess.ALL`. For CRM record attachments, `ZohoCRM.modules.ALL` is additionally needed for the parent module, alongside `ZohoCRM.modules.attachments.CREATE` and `ZohoCRM.modules.attachments.READ`. WorkDrive uploads need `WorkDrive.files.CREATE` and `WorkDrive.files.READ`.
 - WorkDrive resource IDs are opaque strings. Resolve them through the WorkDrive MCP skill and never derive one from a path or file name.
 - Revoke unused Self Clients in the API Console.
-- Uploads are subject to Zoho rate limits and per-plan file size limits. The bridge backs off on HTTP 429. A local file-size pre-check is not implemented yet ([#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2)).
+- Uploads are subject to Zoho rate limits and per-plan file size limits. The bridge backs off on HTTP 429. Local file size pre-checks enforce documented limits before upload (Books 7MB / 5MB, CRM 20MB, WorkDrive 250MB) and are configurable via `--max-bytes` or env vars ([#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2)).
 
 ---
 

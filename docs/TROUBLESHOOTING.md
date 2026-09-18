@@ -30,6 +30,19 @@ to a fallback handler before scope evaluation. Neither variant uploads anything.
 The MCP tool schema allows fewer path variables than the REST API documentation
 suggests. On Zoho Projects only `portal_id` is accepted, not `project_id`.
 
+### File size exceeded
+
+The bridge validates file size locally before building the multipart body:
+
+| Target | Documented default limit | Override environment variable |
+|---|---|---|
+| `expense-receipt` | 7 MB | `ZOHO_BRIDGE_MAX_BYTES_EXPENSE_RECEIPT` |
+| `bill-attachment` | 5 MB | `ZOHO_BRIDGE_MAX_BYTES_BILL_ATTACHMENT` |
+| `record-attachment` | 20 MB | `ZOHO_BRIDGE_MAX_BYTES_RECORD_ATTACHMENT` |
+| `file-upload`, `new-version` | 250 MB | `ZOHO_BRIDGE_MAX_BYTES_FILE_UPLOAD` |
+
+You can also pass `--max-bytes <bytes>` on the CLI to override the limit for a single run.
+
 ### File extension rejected
 
 Zoho enforces a different allowlist per endpoint, and they are not consistent:

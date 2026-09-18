@@ -6,13 +6,14 @@ Uploads binary attachments to Zoho services using real multipart/form-data,
 followed by mandatory read-back SHA-256 verification.
 
 Usage:
-    python3 scripts/zoho_attach.py \\
-        --app books \\
-        --target expense-receipt \\
-        --id 123456000000123456 \\
-        --file /path/to/receipt.pdf \\
-        [--organization-id 789012345] \\
-        [--profile client_a]
+    python3 scripts/zoho_attach.py \
+        --app books \
+        --target expense-receipt \
+        --id 123456000000123456 \
+        --file /path/to/receipt.pdf \
+        [--organization-id 789012345] \
+        [--profile client_a] \
+        [--max-bytes 7340032]
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ from bridge import (
     upload_crm_record_attachment,
     upload_workdrive_file,
     validate_file_extension,
+    validate_file_size,
     verify_books_bill_attachment,
     verify_books_expense_receipt,
     verify_crm_record_attachment,
@@ -110,13 +112,23 @@ def parse_args(args=None) -> argparse.Namespace:
         default=None,
         help="Named configuration profile (e.g. 'acme' -> ZOHO_BRIDGE_ACME_*)",
     )
+    parser.add_argument(
+        "--max-bytes",
+        required=False,
+        type=int,
+        default=None,
+        help=(
+            "Optional maximum file size in bytes. Overrides the documented "
+            "target default and environment variables."
+        ),
+    )
     return parser.parse_args(args)
 
 
 def main(cli_args=None) -> int:
     args = parse_args(cli_args)
 
-    # 1. Validate file existence and extension
+    # 1. Validate file existence, extension, and size
     file_path = Path(args.file).resolve()
     if not file_path.is_file():
         print(f"Error: File not found: {args.file}", file=sys.stderr)
@@ -124,6 +136,17 @@ def main(cli_args=None) -> int:
 
     try:
         validate_file_extension(str(file_path), args.target)
+    except ValueError as exc:
+        print(f"Validation error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        validate_file_size(
+            str(file_path),
+            args.target,
+            override_bytes=args.max_bytes,
+            profile=args.profile,
+        )
     except ValueError as exc:
         print(f"Validation error: {exc}", file=sys.stderr)
         return 1
