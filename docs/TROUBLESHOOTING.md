@@ -142,6 +142,9 @@ This requires `ZohoBooks.settings.READ`. If the token lacks that scope, the 6024
 payload may still include candidate organizations; `parse_books_6024_organizations`
 extracts IDs and names from `organizations` or `error_info` without printing tokens.
 
+Projects portal IDs are listed with `python3 scripts/discover.py projects-portals`
+and require `ZohoProjects.portals.READ`.
+
 ---
 
 ## Data centers
