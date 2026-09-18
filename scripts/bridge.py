@@ -49,6 +49,26 @@ API_DC_MAP: Dict[str, str] = {
     "com.cn": "zohoapis.com.cn",
 }
 
+# WorkDrive serves file downloads from a dedicated host per data center, which
+# is neither the accounts host nor the zohoapis host.
+# https://www.zoho.com/workdrive/developer/docs/api/v1/download-file.html
+WORKDRIVE_DOWNLOAD_DC_MAP: Dict[str, str] = {
+    "eu": "download.zoho.eu",
+    "com": "download.zoho.com",
+    "in": "download.zoho.in",
+    "com.au": "download.zoho.com.au",
+    "jp": "download.zoho.jp",
+    "ca": "download.zohocloud.ca",
+    "sa": "files.zoho.sa",
+    "com.cn": "download.zoho.com.cn",
+}
+
+# Documented maximum for the multipart WorkDrive upload endpoint. Larger files
+# need the separate stream upload endpoint, which this bridge does not
+# implement.
+# https://www.zoho.com/workdrive/developer/docs/api/v1/upload-file.html
+WORKDRIVE_MAX_UPLOAD_BYTES: int = 250 * 1024 * 1024
+
 # ---------------------------------------------------------------------------
 # Extension allowlists per target
 # ---------------------------------------------------------------------------
@@ -298,6 +318,35 @@ def crm_base_url(dc: str) -> str:
     """Return the Zoho CRM API v8 base URL (e.g. https://www.zohoapis.eu/crm/v8)."""
     resolve_dc(dc)  # validate
     return f"https://www.{API_DC_MAP[dc.lower().strip()]}/crm/v8"
+
+
+def workdrive_base_url(dc: str) -> str:
+    """Return the WorkDrive API base URL (e.g. https://www.zohoapis.eu/workdrive)."""
+    resolve_dc(dc)  # validate
+    return f"https://www.{API_DC_MAP[dc.lower().strip()]}/workdrive"
+
+
+def workdrive_download_base_url(dc: str) -> str:
+    """Return the WorkDrive download host base URL (e.g. https://download.zoho.eu)."""
+    resolve_dc(dc)  # validate
+    return f"https://{WORKDRIVE_DOWNLOAD_DC_MAP[dc.lower().strip()]}"
+
+
+def validate_workdrive_resource_id(value: str, label: str) -> str:
+    """
+    Validate an opaque WorkDrive resource ID before URL construction.
+
+    WorkDrive IDs are opaque alphanumeric strings, unlike the numeric IDs used
+    by Books and CRM.
+    """
+    normalized = str(value or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", normalized):
+        raise ValueError(
+            f"{label} must be an opaque WorkDrive resource ID "
+            "(letters, digits, underscore, hyphen). Resolve it with the WorkDrive "
+            "MCP skill instead of deriving it from a path or file name."
+        )
+    return normalized
 
 
 def validate_crm_module(module: str) -> str:
@@ -569,6 +618,14 @@ def validate_file_extension(file_path: str, target: str) -> str:
         if not ext:
             raise ValueError("CRM record attachments require a filename extension")
         return ext
+    # WorkDrive publishes no fixed extension allowlist either. Blocked types are
+    # an organization setting, reported by the API as D9236 (blocked list) or
+    # D9237 (not in the org-allowed list). Require an extension and let the
+    # account policy decide.
+    if target in ("file-upload", "new-version"):
+        if not ext:
+            raise ValueError("WorkDrive uploads require a filename extension")
+        return ext
     allowed = allowed_extensions(target)
     if ext not in allowed:
         raise ValueError(
@@ -746,6 +803,12 @@ def parse_zoho_response(body: bytes, status: int, action_context: str) -> Dict[s
                     if isinstance(first, dict):
                         msg = first.get("message")
                         code = first.get("code")
+                # WorkDrive JSON:API errors: {"errors": [{"id": "F6003", "title": "..."}]}
+                if not msg and isinstance(data.get("errors"), list) and data["errors"]:
+                    first_err = data["errors"][0]
+                    if isinstance(first_err, dict):
+                        msg = first_err.get("title") or first_err.get("detail") or first_err.get("message")
+                        code = first_err.get("id") or first_err.get("code")
                 if msg:
                     raise RuntimeError(
                         f"{action_context} failed (HTTP {status}): {msg} (code: {code})"
@@ -762,6 +825,14 @@ def parse_zoho_response(body: bytes, status: int, action_context: str) -> Dict[s
         ) from exc
 
     if isinstance(data, dict):
+        # WorkDrive JSON:API errors inside HTTP 200 (if any)
+        if isinstance(data.get("errors"), list) and data["errors"]:
+            first_err = data["errors"][0]
+            if isinstance(first_err, dict):
+                err_msg = first_err.get("title") or first_err.get("detail") or "unknown WorkDrive error"
+                err_code = first_err.get("id") or first_err.get("code")
+                raise RuntimeError(f"{action_context} error (WorkDrive code {err_code}): {err_msg}")
+
         code = data.get("code")
         if code is not None and code not in (0, "SUCCESS", "success"):
             msg = data.get("message", "unknown error")
@@ -1060,6 +1131,145 @@ def verify_crm_record_attachment(
         )
     except Exception as exc:
         return False, f"Verification failed: unable to read back CRM attachment ({exc})"
+
+    downloaded_sha256 = sha256_bytes(downloaded)
+    if downloaded_sha256 == expected_sha256:
+        return True, f"Verified: SHA-256 match ({downloaded_sha256})"
+    return False, (
+        f"Verification failed: SHA-256 mismatch. "
+        f"Expected {expected_sha256}, got {downloaded_sha256}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# WorkDrive API Upload & Read-Back
+# ---------------------------------------------------------------------------
+
+def upload_workdrive_file(
+    dc: str,
+    access_token: str,
+    parent_id: str,
+    file_path: str,
+    filename: Optional[str] = None,
+    override_name_exist: bool = False,
+) -> Dict[str, Any]:
+    """
+    Upload a binary file into a WorkDrive folder using multipart/form-data.
+
+    POST /workdrive/api/v1/upload
+    Multipart fields:
+      - 'content': binary file bytes (required, documented maximum 250 MB)
+      - 'parent_id': destination folder ID (required)
+      - 'filename': file name including its extension (optional)
+      - 'override-name-exist': 'true' stores the upload as a new top version of
+        an existing file with the same name. 'false' appends a timestamp.
+
+    The same endpoint serves both a new file and a new version; the difference
+    is override-name-exist.
+    """
+    target = "new-version" if override_name_exist else "file-upload"
+    validate_file_extension(file_path, target)
+    parent_id = validate_workdrive_resource_id(parent_id, "WorkDrive parent folder ID")
+
+    size = os.path.getsize(file_path)
+    if size > WORKDRIVE_MAX_UPLOAD_BYTES:
+        raise ValueError(
+            f"File is {size} bytes, above the documented 250 MB limit of the "
+            "WorkDrive multipart upload endpoint. Larger files need the separate "
+            "stream upload endpoint, which this bridge does not implement."
+        )
+
+    extra_fields: Dict[str, str] = {
+        "parent_id": parent_id,
+        "filename": filename or Path(file_path).name,
+        "override-name-exist": "true" if override_name_exist else "false",
+    }
+
+    body, content_type = build_multipart_body(
+        file_path, field_name="content", extra_fields=extra_fields
+    )
+    url = f"{workdrive_base_url(dc)}/api/v1/upload"
+    status, resp_bytes = api_request(
+        url, access_token, data=body, content_type=content_type, method="POST"
+    )
+    context = "WorkDrive new version upload" if override_name_exist else "WorkDrive file upload"
+    return parse_zoho_response(resp_bytes, status, context)
+
+
+def extract_workdrive_resource_id(upload_response: Dict[str, Any]) -> Optional[str]:
+    """
+    Extract the uploaded file's resource ID from a WorkDrive upload response.
+
+    WorkDrive answers in JSON:API shape, with the resource ID inside
+    data[0].attributes. Both 'resource_id' and the uppercase 'RESOURCE_ID'
+    spelling appear in Zoho's own documentation.
+    """
+    if not isinstance(upload_response, dict):
+        return None
+
+    entries = upload_response.get("data")
+    if isinstance(entries, dict):
+        entries = [entries]
+    if not isinstance(entries, list):
+        return None
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        attributes = entry.get("attributes")
+        if isinstance(attributes, dict):
+            for key in ("resource_id", "RESOURCE_ID"):
+                value = attributes.get(key)
+                if value:
+                    return str(value)
+        value = entry.get("id")
+        if value:
+            return str(value)
+    return None
+
+
+def download_workdrive_file(
+    dc: str,
+    access_token: str,
+    resource_id: str,
+    version: Optional[str] = None,
+) -> bytes:
+    """
+    Download a WorkDrive file from the dedicated download host.
+
+    GET https://download.zoho.<dc>/v1/workdrive/download/{resource_id}
+    """
+    resource_id = validate_workdrive_resource_id(resource_id, "WorkDrive resource ID")
+    url = f"{workdrive_download_base_url(dc)}/v1/workdrive/download/{resource_id}"
+    if version:
+        url = f"{url}?{urllib.parse.urlencode({'version': version})}"
+
+    status, body = api_request(url, access_token, method="GET")
+    if status >= 400:
+        err_text = body.decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"Failed to download WorkDrive file: HTTP {status} \u2014 {err_text}"
+        )
+    return body
+
+
+def verify_workdrive_file(
+    dc: str,
+    access_token: str,
+    resource_id: str,
+    expected_sha256: str,
+    version: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """
+    Read back the uploaded WorkDrive file and compare its SHA-256 digest.
+    Returns (success_bool, message).
+    """
+    try:
+        downloaded = download_workdrive_file(
+            dc, access_token, resource_id, version=version
+        )
+    except Exception as exc:
+        return False, f"Verification failed: unable to read back WorkDrive file ({exc})"
 
     downloaded_sha256 = sha256_bytes(downloaded)
     if downloaded_sha256 == expected_sha256:

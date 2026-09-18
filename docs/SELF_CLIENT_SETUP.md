@@ -105,6 +105,31 @@ GET  https://www.zohoapis.<dc>/crm/v8/{module}/{record_id}/Attachments?fields=id
 GET  https://www.zohoapis.<dc>/crm/v8/{module}/{record_id}/Attachments/{attachment_id}
 ```
 
+### Exact scope string for WorkDrive file uploads and new versions
+
+WorkDrive file upload, new-version upload, and mandatory SHA-256 read-back require this complete, comma-separated scope string:
+
+```text
+WorkDrive.files.CREATE,WorkDrive.files.READ
+```
+
+| Scope | Why it is required |
+|---|---|
+| `WorkDrive.files.CREATE` | `POST /workdrive/api/v1/upload` uploads the multipart form field named `content`. The same endpoint stores a new top version when `override-name-exist=true`. |
+| `WorkDrive.files.READ` | `GET https://download.zoho.<dc>/v1/workdrive/download/{resource_id}` downloads the uploaded bytes for SHA-256 verification. |
+
+Both are required. A Books- or CRM-only refresh token returns `F7007 Invalid OAuth scope` on every WorkDrive call. Generate a new grant with the complete scope string and exchange it for a new refresh token. WorkDrive does **not** use a Books `organization_id`; `--id` is the destination folder ID, resolved through the companion WorkDrive MCP skill.
+
+WorkDrive endpoint sequence:
+
+```text
+POST https://www.zohoapis.<dc>/workdrive/api/v1/upload
+     multipart: content, parent_id, filename, override-name-exist
+GET  https://download.zoho.<dc>/v1/workdrive/download/{resource_id}
+```
+
+The documented maximum for this multipart endpoint is 250 MB. Larger files need the separate stream-upload API, which this bridge does not implement. Blocked and allowed file types are an organization policy, not a published global allowlist; the API reports them as `D9236` or `D9237`.
+
 ### Future app scopes
 
 The following entries are planning notes for later adapters and must be rechecked against the exact endpoint before implementation:
@@ -112,7 +137,6 @@ The following entries are planning notes for later adapters and must be rechecke
 | App | Purpose | Expected scope family |
 |---|---|---|
 | Projects | task and comment attachments | app-specific Projects create/read scopes |
-| WorkDrive | file upload | app-specific WorkDrive create/read scopes |
 
 Read access is part of the bridge contract. The bridge must verify every upload instead of trusting an HTTP status or success message.
 

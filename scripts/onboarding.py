@@ -91,6 +91,11 @@ def main(cli_args=None) -> int:
     print("\nIn Zoho API Console -> Self Client -> Generate Code:")
     print("Required scopes for Books:")
     print("  ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBooks.bills.READ")
+    print("Required scopes for CRM record attachments:")
+    print("  ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachments.READ")
+    print("Required scopes for WorkDrive uploads and new versions:")
+    print("  WorkDrive.files.CREATE,WorkDrive.files.READ")
+    print("Scopes are fixed when the refresh token is created; include every app you need.")
     grant_code = prompt_input("\nEnter generated Grant Code (expires in 10 mins)")
     if not grant_code:
         print("Error: Grant Code is required.", file=sys.stderr)

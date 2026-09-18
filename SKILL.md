@@ -1,6 +1,6 @@
 ---
 name: zoho-attachment-bridge
-version: 0.3.0
+version: 0.4.0
 description: Upload binary attachments to Zoho Books, CRM, Projects, Inventory and WorkDrive via the REST API when Zoho MCP upload actions fail silently. Self Client OAuth, multipart/form-data, verified uploads.
 ---
 
@@ -8,7 +8,7 @@ description: Upload binary attachments to Zoho Books, CRM, Projects, Inventory a
 
 Uploads binary files to Zoho when MCP cannot. Sits next to a Zoho MCP server: MCP handles records and reads, this skill handles bytes.
 
-> **Status: Books adapter implemented, expense receipts verified live; CRM v8 record attachments implemented with mocked upload/list/download verification.** See `CHANGELOG.md`, `docs/ROADMAP.md` and `docs/TROUBLESHOOTING.md`.
+> **Status: Books, CRM v8, and WorkDrive adapters implemented.** Books expense receipts are verified live; CRM and WorkDrive are covered by verified mock tests. See `CHANGELOG.md`, `docs/ROADMAP.md` and `docs/TROUBLESHOOTING.md`.
 
 ## When to use
 
@@ -64,6 +64,8 @@ Zoho enforces different allowlists per endpoint:
 | `expense-receipt` | gif, png, jpeg, jpg, bmp, pdf, xls, xlsx, doc, docx |
 | `bill-attachment` | gif, png, jpeg, jpg, bmp, pdf |
 | `record-attachment` (CRM) | Zoho publishes no extension allowlist for this endpoint; the bridge requires a filename extension and leaves enforcement to the API |
+| `file-upload` (WorkDrive) | Zoho enforces blocked/allowed extensions per organization policy; the bridge requires a filename extension and leaves enforcement to the API |
+| `new-version` (WorkDrive) | Same policy as `file-upload`; creates a new top version over an existing file with the same name |
 
 ## Onboarding
 
@@ -97,6 +99,15 @@ ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachmen
 
 The parent module scope and both attachment scopes are required. Zoho scopes are fixed when the refresh token is created, so an existing token missing any one of them needs a new grant and refresh token.
 
+For WorkDrive file uploads and new versions, create a refresh token with:
+
+```text
+WorkDrive.files.CREATE,WorkDrive.files.READ
+```
+
+- `WorkDrive.files.CREATE`: upload files and new versions to `POST /workdrive/api/v1/upload` (multipart `content`, max 250 MB).
+- `WorkDrive.files.READ`: download the uploaded file via `GET https://download.zoho.<dc>/v1/workdrive/download/{resource_id}` for mandatory SHA-256 verification.
+
 Interactive: walks through the Self Client grant flow, exchanges the grant token, and writes the four variables to the env file (mode 0600, unrelated lines preserved).
 
 Manual steps are documented in `docs/SELF_CLIENT_SETUP.md`. Verify the setup with a real upload via `zoho_attach.py`.
@@ -113,9 +124,18 @@ python3 scripts/zoho_attach.py --app books --target bill-attachment --id <bill_i
 # CRM v8 record attachment upload with verification
 # --module is required; CRM does not use --organization-id.
 python3 scripts/zoho_attach.py --app crm --target record-attachment --module <module> --id <record_id> --file <path>
+
+# WorkDrive file upload into a folder with SHA-256 verification
+# --id is the destination folder ID (resolved through MCP).
+python3 scripts/zoho_attach.py --app workdrive --target file-upload --id <folder_id> --file <path> [--filename <name>]
+
+# WorkDrive new version upload over an existing file
+# --id is the destination folder ID where the existing file lives.
+# --filename must match the existing file name exactly.
+python3 scripts/zoho_attach.py --app workdrive --target new-version --id <folder_id> --file <path> --filename <existing_name>
 ```
 
-Pass `--organization-id <id>` or set `ZOHO_BRIDGE_BOOKS_ORG_ID` for Books. CRM does not require or use an organization ID; pass the parent module explicitly via `--module` (such as `Leads`, `Contacts`, `Deals`, or `Accounts`).
+Pass `--organization-id <id>` or set `ZOHO_BRIDGE_BOOKS_ORG_ID` for Books. CRM does not require or use an organization ID; pass the parent module explicitly via `--module` (such as `Leads`, `Contacts`, `Deals`, or `Accounts`). WorkDrive takes the destination folder ID via `--id` and does not use an organization ID.
 
 For CRM verification, the bridge performs:
 
@@ -123,7 +143,14 @@ For CRM verification, the bridge performs:
 2. `GET /crm/v8/{module}/{record_id}/Attachments?fields=id,File_Name` to identify the newly uploaded attachment.
 3. `GET /crm/v8/{module}/{record_id}/Attachments/{attachment_id}` and a SHA-256 comparison against the local file.
 
-Exit code `0` only after the uploaded file was confirmed present on the record via SHA-256 read-back verification.
+For WorkDrive verification, the bridge performs:
+
+1. `POST /workdrive/api/v1/upload` with multipart `content`, `parent_id`, `filename`, and `override-name-exist`.
+2. Extracts the created/updated `resource_id` from the JSON:API response.
+3. `GET https://download.zoho.<dc>/v1/workdrive/download/{resource_id}` from the dedicated download server.
+4. Compares the downloaded bytes against the local file's SHA-256 digest.
+
+Exit code `0` only after the uploaded file was confirmed present in WorkDrive via SHA-256 read-back verification.
 
 ## Scope
 
@@ -132,17 +159,17 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 | Books | expense receipt | implemented, verified live |
 | Books | bill attachment | implemented, unit tests only |
 | CRM | record attachment | implemented, mocked upload/list/download verification |
+| WorkDrive | file upload, new version | implemented, mocked upload/download SHA-256 verification ([#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9)) |
 | Projects | task and comment attachment | planned |
 | Inventory | item image, bill attachment | planned |
-| WorkDrive | file upload, new version | planned, [#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9) |
 
 Next work: `docs/ROADMAP.md` and the issue tracker.
 
-Until the WorkDrive adapter lands, do not promise a working WorkDrive upload. Resolve the destination folder through the WorkDrive MCP skill, then either wait for the adapter or perform a direct REST `multipart/form-data` upload and verify it by re-listing the folder.
+Resolve the destination folder through the WorkDrive MCP skill, then pass its ID to `zoho_attach.py --app workdrive --target file-upload|new-version --id <folder_id> --file <path>`.
 
 ## Safety
 
 - Treat `ZOHO_BRIDGE_REFRESH_TOKEN` as a password. Never print or log it.
-- Request the narrowest OAuth scope per app. Do not use `ZohoBooks.fullaccess.ALL`. CRM record attachments need `ZohoCRM.modules.ALL` for their parent record module plus `ZohoCRM.modules.attachments.CREATE` and `ZohoCRM.modules.attachments.READ`.
+- Request the narrowest OAuth scope per app. Do not use `ZohoBooks.fullaccess.ALL`. CRM record attachments need `ZohoCRM.modules.ALL` for their parent record module plus `ZohoCRM.modules.attachments.CREATE` and `ZohoCRM.modules.attachments.READ`. WorkDrive uploads need `WorkDrive.files.CREATE` and `WorkDrive.files.READ`.
 - Confirm the target organization or portal id before uploading customer files.
 - Respect Zoho rate limits. Back off on HTTP 429.

@@ -43,6 +43,23 @@ Note that spreadsheets and Word documents are accepted for expense receipts but
 **not** for bill attachments. The bridge rejects violations locally before
 spending an API call.
 
+For WorkDrive, allowed and blocked extensions are configured per organization.
+The bridge only requires an extension, then lets WorkDrive enforce the real
+account policy. WorkDrive returns `D9236` when the extension is blocked and
+`D9237` when it is not in the organization's allowed list.
+
+### WorkDrive upload is larger than 250 MB
+
+The multipart endpoint used by `--app workdrive` has a documented maximum of
+250 MB. The bridge rejects larger files locally. Files above 250 MB require
+WorkDrive's separate stream upload endpoint, which is not implemented yet.
+
+### WorkDrive upload response contains no resource ID
+
+The bridge refuses to report success because it cannot perform SHA-256 read-back
+without the uploaded file's `resource_id`. Re-list the destination folder with
+the WorkDrive MCP skill before retrying, otherwise you may create a duplicate.
+
 ---
 
 ## Authentication
@@ -84,6 +101,16 @@ Common case: `GET /organizations` requires `ZohoBooks.settings.READ`, which is
 not part of the minimal upload scope set. Likewise, deleting a record requires a
 `DELETE` scope that the upload-only setup deliberately omits.
 
+For WorkDrive, both scopes are mandatory:
+
+```text
+WorkDrive.files.CREATE,WorkDrive.files.READ
+```
+
+`CREATE` uploads the bytes; `READ` downloads them again for SHA-256 verification.
+A Books- or CRM-only refresh token returns `F7007 Invalid OAuth scope`. Generate
+a new grant with the complete scope list rather than reusing an incompatible token.
+
 ### `This user belongs to multiple organizations`
 
 ```json
@@ -104,6 +131,7 @@ Zoho uses **two different host families**, which is easy to get wrong:
 |---|---|---|---|
 | OAuth | `accounts.<domain>` | `accounts.zoho.eu` | `accounts.zohocloud.ca` |
 | API | `www.zohoapis.<tld>` | `www.zohoapis.eu` | `www.zohoapis.ca` |
+| WorkDrive download | dedicated host | `download.zoho.eu` | `download.zohocloud.ca` |
 
 Canada is the trap: the accounts host is `zohocloud.ca` while the API host is
 `zohoapis.ca`. Deriving one from the other produces a host that does not exist.
@@ -112,7 +140,7 @@ Verify what the bridge resolves for your data center:
 
 ```bash
 python3 -c "import sys; sys.path.insert(0,'scripts'); import bridge; \
-print(bridge.accounts_base_url('eu'), bridge.books_base_url('eu'))"
+print(bridge.accounts_base_url('eu'), bridge.books_base_url('eu'), bridge.workdrive_download_base_url('eu'))"
 ```
 
 ---
@@ -133,5 +161,6 @@ feature working as intended: it refuses to report success it cannot prove.
 ### `Verification failed: unable to read back`
 
 The upload may still have succeeded. This usually means the read scope is
-missing (`ZohoBooks.expenses.READ` / `ZohoBooks.bills.READ`). Check the record
-in the Zoho UI before re-uploading, otherwise you risk duplicates.
+missing (`ZohoBooks.expenses.READ` / `ZohoBooks.bills.READ` /
+`WorkDrive.files.READ`). Check the record or WorkDrive folder before re-uploading,
+otherwise you risk duplicates.

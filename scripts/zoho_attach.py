@@ -31,16 +31,19 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from bridge import (
+    extract_workdrive_resource_id,
     load_env,
     refresh_access_token,
     sha256_file,
     upload_books_bill_attachment,
     upload_books_expense_receipt,
     upload_crm_record_attachment,
+    upload_workdrive_file,
     validate_file_extension,
     verify_books_bill_attachment,
     verify_books_expense_receipt,
     verify_crm_record_attachment,
+    verify_workdrive_file,
 )
 
 
@@ -51,19 +54,28 @@ def parse_args(args=None) -> argparse.Namespace:
     parser.add_argument(
         "--app",
         required=True,
-        choices=["books", "crm"],
-        help="Target Zoho application (books, crm)",
+        choices=["books", "crm", "workdrive"],
+        help="Target Zoho application (books, crm, workdrive)",
     )
     parser.add_argument(
         "--target",
         required=True,
-        choices=["expense-receipt", "bill-attachment", "record-attachment"],
+        choices=[
+            "expense-receipt",
+            "bill-attachment",
+            "record-attachment",
+            "file-upload",
+            "new-version",
+        ],
         help="Target upload entity type",
     )
     parser.add_argument(
         "--id",
         required=True,
-        help="ID of the target record (e.g. expense ID, bill ID, or CRM record ID)",
+        help=(
+            "ID of the target record (expense ID, bill ID, CRM record ID, or the "
+            "WorkDrive destination folder ID)"
+        ),
     )
     parser.add_argument(
         "--file",
@@ -81,6 +93,16 @@ def parse_args(args=None) -> argparse.Namespace:
         required=False,
         default=None,
         help="Zoho Books organization ID (defaults to ZOHO_BRIDGE_BOOKS_ORG_ID env var)",
+    )
+    parser.add_argument(
+        "--filename",
+        required=False,
+        default=None,
+        help=(
+            "WorkDrive file name to store, including its extension "
+            "(defaults to the local file name). For --target new-version this must "
+            "match the existing file name exactly."
+        ),
     )
     parser.add_argument(
         "--profile",
@@ -149,6 +171,14 @@ def main(cli_args=None) -> int:
                 file=sys.stderr,
             )
             return 1
+    elif args.app == "workdrive":
+        if args.target not in ("file-upload", "new-version"):
+            print(
+                f"Error: Invalid target '{args.target}' for WorkDrive. "
+                "Supported targets: file-upload, new-version.",
+                file=sys.stderr,
+            )
+            return 1
 
     dc = config["dc"]
 
@@ -166,7 +196,12 @@ def main(cli_args=None) -> int:
         return 1
 
     # 5. Upload file
-    target_desc = f"{args.module} {args.id}" if args.app == "crm" else f"{args.target} {args.id}"
+    if args.app == "crm":
+        target_desc = f"{args.module} {args.id}"
+    elif args.app == "workdrive":
+        target_desc = f"folder {args.id}"
+    else:
+        target_desc = f"{args.target} {args.id}"
     print(f"Uploading {file_path.name} to {args.app} ({target_desc})...")
     try:
         if args.app == "books" and args.target == "expense-receipt":
@@ -192,6 +227,15 @@ def main(cli_args=None) -> int:
                 module=args.module,
                 record_id=args.id,
                 file_path=str(file_path),
+            )
+        elif args.app == "workdrive":
+            res = upload_workdrive_file(
+                dc=dc,
+                access_token=access_token,
+                parent_id=args.id,
+                file_path=str(file_path),
+                filename=args.filename,
+                override_name_exist=(args.target == "new-version"),
             )
         else:
             print(f"Error: Unsupported app/target: {args.app}/{args.target}", file=sys.stderr)
@@ -249,6 +293,24 @@ def main(cli_args=None) -> int:
             expected_sha256=local_sha,
             attachment_id=str(uploaded_attachment_id) if uploaded_attachment_id else None,
         )
+    elif args.app == "workdrive":
+        resource_id = extract_workdrive_resource_id(res) if isinstance(res, dict) else None
+        if not resource_id:
+            # No resource ID means the upload cannot be proven. Never treat an
+            # unverifiable WorkDrive response as success.
+            verified, vmsg = False, (
+                "WorkDrive upload response did not contain a resource ID, so the "
+                "upload cannot be verified. Re-list the destination folder before "
+                "assuming anything was stored."
+            )
+        else:
+            print(f"Uploaded WorkDrive resource ID: {resource_id}")
+            verified, vmsg = verify_workdrive_file(
+                dc=dc,
+                access_token=access_token,
+                resource_id=resource_id,
+                expected_sha256=local_sha,
+            )
     else:
         verified, vmsg = False, "Unsupported target for verification."
 

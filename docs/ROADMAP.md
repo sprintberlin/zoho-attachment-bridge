@@ -2,7 +2,7 @@
 
 Tracked in GitHub issues. This file is the index, not a second tracker.
 
-Current release: **0.3.0 (unreleased)**. Books expense receipts are implemented and verified live. Bill attachments are implemented but only unit-tested. CRM v8 record attachments are implemented with mocked upload/list/download verification.
+Current release: **0.4.0 (unreleased)**. Books expense receipts are implemented and verified live. Bill attachments are implemented but only unit-tested. CRM v8 record attachments and WorkDrive file/version uploads are implemented with mocked upload/download SHA-256 verification.
 
 ## 0.1.0 — scaffolding
 
@@ -29,7 +29,7 @@ Completed. Repository, configuration contract, MCP failure documentation, Self C
 Companion MCP skill: [openclaw-zoho-workdrive-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-workdrive-mcp-skill) (resolves teams, team folders, folders, and resource IDs via MCP before uploads).
 
 - [ ] Inventory item images and bill attachments — [#8](https://github.com/sprintberlin/zoho-attachment-bridge/issues/8)
-- [ ] WorkDrive file upload and new version (`POST /files` with multipart `content`) — [#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9)
+- [x] WorkDrive file upload and new version (`POST /workdrive/api/v1/upload` with multipart `content`; `override-name-exist=true` for a new version), plus dedicated-download-host SHA-256 read-back — mocked verification ([#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9))
 
 ## 1.0.0 — release
 

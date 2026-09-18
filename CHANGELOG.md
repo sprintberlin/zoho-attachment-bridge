@@ -5,6 +5,37 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-09-18
+
+### Added
+
+- WorkDrive file upload and new version adapter with `--app workdrive --target file-upload|new-version`,
+  resolving [issue #9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9).
+- Multipart upload using `POST https://www.zohoapis.<dc>/workdrive/api/v1/upload`
+  with form field `content`, `parent_id`, `filename`, and `override-name-exist`.
+  The documented 250 MB multipart upload limit is validated locally.
+- New version support: the same endpoint with `override-name-exist=true` and
+  a matching `--filename` stores a new top version of an existing file.
+- Mandatory WorkDrive read-back verification: downloads the uploaded file from
+  the dedicated download host (`https://download.zoho.<dc>/v1/workdrive/download/{resource_id}`)
+  and compares its SHA-256 digest against the local file. The upload response's
+  resource ID is extracted from JSON:API `data[0].attributes.resource_id`.
+- WorkDrive JSON:API error parsing for HTTP 4xx responses (`errors[].id` / `errors[].title`).
+- Mock-only unit test coverage for WorkDrive API URLs, dedicated download host
+  mapping (including CA and SA deviations), multipart payload structure,
+  version override flag, 250 MB file size limit enforcement, opaque resource ID
+  validation, error parsing, and CLI commands.
+- Self Client scope documentation for WorkDrive: `WorkDrive.files.CREATE` and
+  `WorkDrive.files.READ`.
+
+### Verified
+
+- Implementation was verified with 65 passing unit tests using mocks and
+  temporary files. An attempted live probe against the SprintCX internal Self
+  Client confirmed that a Books/CRM token returns `F7007 Invalid OAuth scope`
+  until a grant with `WorkDrive.files.*` is created, confirming the documented
+  scope requirement. No account secrets were logged.
+
 ## [0.3.0] — 2026-09-11
 
 ### Added

@@ -625,6 +625,216 @@ class TestCrmOperationsAndVerification(unittest.TestCase):
         mock_download.assert_not_called()
 
 
+class TestWorkDriveOperationsAndVerification(unittest.TestCase):
+    """WorkDrive upload, new version, and mandatory download read-back."""
+
+    def _temp_file(self, content: bytes = b"WorkDrive binary payload", suffix: str = ".pdf") -> str:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(content)
+            self.addCleanup(lambda p=tmp.name: os.path.exists(p) and os.unlink(p))
+            return tmp.name
+
+    def test_workdrive_base_url_uses_zohoapis_host(self):
+        expected = {
+            "eu": "https://www.zohoapis.eu/workdrive",
+            "com": "https://www.zohoapis.com/workdrive",
+            "ca": "https://www.zohoapis.ca/workdrive",
+        }
+        for dc, url in expected.items():
+            self.assertEqual(bridge.workdrive_base_url(dc), url)
+        with self.assertRaises(ValueError):
+            bridge.workdrive_base_url("invalid_dc")
+
+    def test_workdrive_download_uses_dedicated_download_host(self):
+        # Downloads are not served from zohoapis; Canada and Saudi Arabia differ
+        # from the simple download.zoho.<tld> pattern.
+        expected = {
+            "eu": "https://download.zoho.eu",
+            "com": "https://download.zoho.com",
+            "ca": "https://download.zohocloud.ca",
+            "sa": "https://files.zoho.sa",
+        }
+        for dc, url in expected.items():
+            self.assertEqual(bridge.workdrive_download_base_url(dc), url)
+
+    def test_workdrive_resource_id_validation_rejects_injection(self):
+        self.assertEqual(
+            bridge.validate_workdrive_resource_id("ly9zm0170fb40015f4e2", "folder"),
+            "ly9zm0170fb40015f4e2",
+        )
+        for bad in ["abc/../def", "abc?version=2", "", "abc def"]:
+            with self.assertRaises(ValueError):
+                bridge.validate_workdrive_resource_id(bad, "folder")
+
+    def test_workdrive_accepts_any_extension_but_requires_one(self):
+        for name in ["doc.pdf", "archive.zip", "data.csv", "image.webp"]:
+            for target in ("file-upload", "new-version"):
+                self.assertTrue(bridge.validate_file_extension(name, target).startswith("."))
+        with self.assertRaises(ValueError):
+            bridge.validate_file_extension("extensionless", "file-upload")
+
+    @patch("bridge.api_request")
+    def test_upload_workdrive_file_posts_multipart_content_and_parent_id(self, mock_api):
+        mock_api.return_value = (200, json.dumps({
+            "data": [{
+                "attributes": {
+                    "resource_id": "g4xh1aaaabbbbccccdddd100c5",
+                    "parent_id": "ly9zm0170fb40015f4e2",
+                    "FileName": "report.pdf",
+                },
+                "type": "files",
+            }],
+        }).encode("utf-8"))
+
+        tmp_path = self._temp_file(b"WorkDrive upload bytes")
+        response = bridge.upload_workdrive_file(
+            dc="eu",
+            access_token="tok",
+            parent_id="ly9zm0170fb40015f4e2",
+            file_path=tmp_path,
+        )
+
+        self.assertEqual(
+            response["data"][0]["attributes"]["resource_id"],
+            "g4xh1aaaabbbbccccdddd100c5",
+        )
+        args, kwargs = mock_api.call_args
+        self.assertEqual(args[0], "https://www.zohoapis.eu/workdrive/api/v1/upload")
+        self.assertEqual(kwargs["method"], "POST")
+        self.assertIn("multipart/form-data; boundary=", kwargs["content_type"])
+        # Zoho names the binary part 'content', not 'file'.
+        self.assertIn(b'name="content"', kwargs["data"])
+        self.assertIn(b'name="parent_id"', kwargs["data"])
+        self.assertIn(b"ly9zm0170fb40015f4e2", kwargs["data"])
+        self.assertIn(b"WorkDrive upload bytes", kwargs["data"])
+        self.assertIn(b'name="override-name-exist"', kwargs["data"])
+
+    @patch("bridge.api_request")
+    def test_new_version_sets_override_name_exist_true(self, mock_api):
+        mock_api.return_value = (200, json.dumps({
+            "data": [{"attributes": {"resource_id": "res1"}, "type": "files"}],
+        }).encode("utf-8"))
+
+        tmp_path = self._temp_file()
+        bridge.upload_workdrive_file(
+            dc="com",
+            access_token="tok",
+            parent_id="parentfolder123",
+            file_path=tmp_path,
+            filename="existing-report.pdf",
+            override_name_exist=True,
+        )
+
+        body = mock_api.call_args.kwargs["data"]
+        self.assertIn(b'name="override-name-exist"', body)
+        self.assertIn(b"true", body)
+        self.assertIn(b"existing-report.pdf", body)
+        # A new version uses the very same upload endpoint.
+        self.assertEqual(
+            mock_api.call_args.args[0],
+            "https://www.zohoapis.com/workdrive/api/v1/upload",
+        )
+
+    @patch("bridge.api_request")
+    def test_first_upload_sends_override_name_exist_false(self, mock_api):
+        mock_api.return_value = (200, json.dumps({"data": []}).encode("utf-8"))
+        tmp_path = self._temp_file()
+
+        bridge.upload_workdrive_file(
+            dc="eu", access_token="tok", parent_id="parent1", file_path=tmp_path
+        )
+
+        body = mock_api.call_args.kwargs["data"]
+        self.assertIn(b'name="override-name-exist"', body)
+        self.assertIn(b"false", body)
+
+    def test_upload_rejects_file_above_documented_250mb_limit(self):
+        tmp_path = self._temp_file()
+        with patch("os.path.getsize", return_value=bridge.WORKDRIVE_MAX_UPLOAD_BYTES + 1):
+            with self.assertRaises(ValueError) as ctx:
+                bridge.upload_workdrive_file(
+                    dc="eu", access_token="tok", parent_id="p1", file_path=tmp_path
+                )
+        self.assertIn("250 MB", str(ctx.exception))
+
+    def test_extract_resource_id_from_upload_response_shapes(self):
+        self.assertEqual(
+            bridge.extract_workdrive_resource_id(
+                {"data": [{"attributes": {"resource_id": "abc123"}}]}
+            ),
+            "abc123",
+        )
+        self.assertEqual(
+            bridge.extract_workdrive_resource_id(
+                {"data": {"attributes": {"RESOURCE_ID": "upper456"}}}
+            ),
+            "upper456",
+        )
+        self.assertEqual(
+            bridge.extract_workdrive_resource_id({"data": [{"id": "fallback789"}]}),
+            "fallback789",
+        )
+        self.assertIsNone(bridge.extract_workdrive_resource_id({"data": []}))
+        self.assertIsNone(bridge.extract_workdrive_resource_id({}))
+
+    @patch("bridge.api_request")
+    def test_download_workdrive_file_uses_download_server(self, mock_api):
+        mock_api.return_value = (200, b"downloaded WorkDrive bytes")
+
+        data = bridge.download_workdrive_file("eu", "tok", "resource123")
+
+        self.assertEqual(data, b"downloaded WorkDrive bytes")
+        mock_api.assert_called_once_with(
+            "https://download.zoho.eu/v1/workdrive/download/resource123",
+            "tok",
+            method="GET",
+        )
+
+    @patch("bridge.api_request")
+    def test_download_workdrive_file_supports_version_query(self, mock_api):
+        mock_api.return_value = (200, b"older version bytes")
+
+        bridge.download_workdrive_file("com", "tok", "resource123", version="2")
+
+        mock_api.assert_called_once_with(
+            "https://download.zoho.com/v1/workdrive/download/resource123?version=2",
+            "tok",
+            method="GET",
+        )
+
+    @patch("bridge.download_workdrive_file")
+    def test_verify_workdrive_file_match_and_mismatch(self, mock_download):
+        raw_bytes = b"exact WorkDrive bytes"
+        mock_download.return_value = raw_bytes
+
+        verified, message = bridge.verify_workdrive_file(
+            "eu", "tok", "resource123", bridge.sha256_bytes(raw_bytes)
+        )
+        self.assertTrue(verified)
+        self.assertIn("Verified", message)
+
+        verified, message = bridge.verify_workdrive_file(
+            "eu", "tok", "resource123", bridge.sha256_bytes(b"different bytes")
+        )
+        self.assertFalse(verified)
+        self.assertIn("mismatch", message)
+
+    @patch("bridge.download_workdrive_file", side_effect=RuntimeError("HTTP 404"))
+    def test_verify_workdrive_file_fails_when_read_back_fails(self, mock_download):
+        verified, message = bridge.verify_workdrive_file(
+            "eu", "tok", "resource123", "a" * 64
+        )
+        self.assertFalse(verified)
+        self.assertIn("unable to read back", message)
+
+    def test_parse_error_understands_workdrive_jsonapi_errors(self):
+        body = json.dumps({"errors": [{"id": "F6003", "title": "Invalid Param found"}]}).encode()
+        with self.assertRaises(RuntimeError) as ctx:
+            bridge.parse_zoho_response(body, 400, "WorkDrive file upload")
+        self.assertIn("Invalid Param found", str(ctx.exception))
+        self.assertIn("F6003", str(ctx.exception))
+
+
 class TestCliZohoAttach(unittest.TestCase):
     """Test zoho_attach CLI execution."""
 
@@ -749,6 +959,114 @@ class TestCliZohoAttach(unittest.TestCase):
             mock_verify.assert_called_once()
             verify_kwargs = mock_verify.call_args.kwargs
             self.assertEqual(verify_kwargs["attachment_id"], "4876876000001021001")
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("zoho_attach.verify_workdrive_file", return_value=(True, "Verified match"))
+    @patch("zoho_attach.upload_workdrive_file", return_value={
+        "data": [{"attributes": {"resource_id": "g4xh1aaaabbbbccccdddd100c5"}}],
+    })
+    @patch("zoho_attach.refresh_access_token", return_value="mock_access_token")
+    @patch("zoho_attach.load_env")
+    def test_successful_workdrive_file_upload(
+        self, mock_env, mock_tok, mock_upload, mock_verify
+    ):
+        mock_env.return_value = {
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "reftok",
+            "dc": "eu",
+            "books_org_id": "",
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"WorkDrive document")
+            tmp_path = tmp.name
+
+        try:
+            ret = zoho_attach.main([
+                "--app", "workdrive",
+                "--target", "file-upload",
+                "--id", "ly9zm0170fb40015f4e2",
+                "--file", tmp_path,
+            ])
+            self.assertEqual(ret, 0)
+            mock_upload.assert_called_once()
+            upload_kwargs = mock_upload.call_args.kwargs
+            self.assertEqual(upload_kwargs["parent_id"], "ly9zm0170fb40015f4e2")
+            self.assertFalse(upload_kwargs["override_name_exist"])
+            self.assertNotIn("organization_id", upload_kwargs)
+            mock_verify.assert_called_once()
+            verify_kwargs = mock_verify.call_args.kwargs
+            self.assertEqual(verify_kwargs["resource_id"], "g4xh1aaaabbbbccccdddd100c5")
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("zoho_attach.verify_workdrive_file", return_value=(True, "Verified match"))
+    @patch("zoho_attach.upload_workdrive_file", return_value={
+        "data": [{"attributes": {"resource_id": "g4xh1aaaabbbbccccdddd100c5"}}],
+    })
+    @patch("zoho_attach.refresh_access_token", return_value="mock_access_token")
+    @patch("zoho_attach.load_env")
+    def test_workdrive_new_version_sets_override_flag(
+        self, mock_env, mock_tok, mock_upload, mock_verify
+    ):
+        mock_env.return_value = {
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "reftok",
+            "dc": "eu",
+            "books_org_id": "",
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"WorkDrive v2")
+            tmp_path = tmp.name
+
+        try:
+            ret = zoho_attach.main([
+                "--app", "workdrive",
+                "--target", "new-version",
+                "--id", "ly9zm0170fb40015f4e2",
+                "--filename", "existing-report.pdf",
+                "--file", tmp_path,
+            ])
+            self.assertEqual(ret, 0)
+            upload_kwargs = mock_upload.call_args.kwargs
+            self.assertTrue(upload_kwargs["override_name_exist"])
+            self.assertEqual(upload_kwargs["filename"], "existing-report.pdf")
+            mock_verify.assert_called_once()
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("zoho_attach.verify_workdrive_file")
+    @patch("zoho_attach.upload_workdrive_file", return_value={"data": []})
+    @patch("zoho_attach.refresh_access_token", return_value="mock_access_token")
+    @patch("zoho_attach.load_env")
+    def test_workdrive_upload_without_resource_id_is_failure(
+        self, mock_env, mock_tok, mock_upload, mock_verify
+    ):
+        mock_env.return_value = {
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "reftok",
+            "dc": "eu",
+            "books_org_id": "",
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"WorkDrive document")
+            tmp_path = tmp.name
+
+        try:
+            ret = zoho_attach.main([
+                "--app", "workdrive",
+                "--target", "file-upload",
+                "--id", "ly9zm0170fb40015f4e2",
+                "--file", tmp_path,
+            ])
+            self.assertEqual(ret, 1)
+            mock_verify.assert_not_called()
         finally:
             os.unlink(tmp_path)
 
