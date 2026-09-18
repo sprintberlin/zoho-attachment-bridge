@@ -22,7 +22,7 @@ Completed. Repository, configuration contract, MCP failure documentation, Self C
 
 - [x] CRM record attachments (`POST /crm/v8/{module}/{record_id}/Attachments`) — mocked upload/list/download SHA-256 verification ([#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3))
 - [ ] Projects task and comment attachments — [#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4)
-- [ ] Organization and portal resolution helpers — [#10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10)
+- [x] Organization and portal resolution helpers — [#10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10)
 
 ## 0.4.0 — Inventory and WorkDrive
 
@@ -35,7 +35,7 @@ Companion MCP skill: [openclaw-zoho-workdrive-mcp-skill](https://github.com/spri
 
 - [ ] Named profiles verified on two data centers — [#11](https://github.com/sprintberlin/zoho-attachment-bridge/issues/11)
 - [x] Safer onboarding (hidden secret entry, grant code file/stdin support, no credentials in chat) — [#5](https://github.com/sprintberlin/zoho-attachment-bridge/issues/5)
-- [ ] Document multi-host Self Client setup — [#6](https://github.com/sprintberlin/zoho-attachment-bridge/issues/6)
+- [x] Document multi-host Self Client setup — [#6](https://github.com/sprintberlin/zoho-attachment-bridge/issues/6)
 - [ ] ClawHub publication — [#7](https://github.com/sprintberlin/zoho-attachment-bridge/issues/7)
 
 ## Working on this repo

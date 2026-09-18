@@ -358,6 +358,12 @@ def workdrive_base_url(dc: str) -> str:
     return f"https://www.{API_DC_MAP[dc.lower().strip()]}/workdrive"
 
 
+def projects_base_url(dc: str) -> str:
+    """Return the Zoho Projects API base URL (e.g. https://projectsapi.zoho.eu)."""
+    resolve_dc(dc)  # validate
+    return f"https://projectsapi.{resolve_dc(dc)}"
+
+
 def workdrive_download_base_url(dc: str) -> str:
     """Return the WorkDrive download host base URL (e.g. https://download.zoho.eu)."""
     resolve_dc(dc)  # validate
@@ -1382,3 +1388,111 @@ def verify_workdrive_file(
         f"Verification failed: SHA-256 mismatch. "
         f"Expected {expected_sha256}, got {downloaded_sha256}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Organization & Portal discovery helpers (Issue #10)
+# ---------------------------------------------------------------------------
+
+def parse_books_6024_organizations(body: bytes) -> List[Dict[str, Any]]:
+    """
+    Extract candidate organizations from a Zoho Books 6024 error response.
+    Returns a list of dicts with keys 'organization_id', 'name', and 'is_default_org'.
+    """
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except Exception:
+        return []
+
+    orgs_raw = data.get("organizations")
+    if not isinstance(orgs_raw, list):
+        error_info = data.get("error_info")
+        if isinstance(error_info, dict):
+            for key in ("organizations", "organization_details", "orgs"):
+                candidate = error_info.get(key)
+                if isinstance(candidate, list):
+                    orgs_raw = candidate
+                    break
+    if not isinstance(orgs_raw, list):
+        orgs_raw = []
+
+    results: List[Dict[str, Any]] = []
+    for item in orgs_raw:
+        if isinstance(item, dict):
+            org_id = str(item.get("organization_id") or item.get("id") or "").strip()
+            name = str(item.get("name") or item.get("organization_name") or "").strip()
+            is_default = bool(item.get("is_default_org", False))
+            if org_id:
+                results.append({
+                    "organization_id": org_id,
+                    "name": name,
+                    "is_default_org": is_default,
+                })
+    return results
+
+
+def list_books_organizations(
+    dc: str,
+    access_token: str,
+) -> List[Dict[str, Any]]:
+    """
+    List Zoho Books organizations accessible to the current access token.
+    Requires optional OAuth scope: ZohoBooks.settings.READ or ZohoBooks.fullaccess.ALL.
+    GET /books/v3/organizations
+    """
+    url = f"{books_base_url(dc)}/organizations"
+    status, body = api_request(url, access_token, method="GET")
+    data = parse_zoho_response(body, status, "list Books organizations")
+    raw_orgs = data.get("organizations", [])
+    results: List[Dict[str, Any]] = []
+    for item in raw_orgs:
+        if isinstance(item, dict):
+            org_id = str(item.get("organization_id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            if org_id:
+                results.append({
+                    "organization_id": org_id,
+                    "name": name,
+                    "is_default_org": bool(item.get("is_default_org", False)),
+                    "currency_code": str(item.get("currency_code") or "").strip(),
+                    "time_zone": str(item.get("time_zone") or "").strip(),
+                })
+    return results
+
+
+def list_projects_portals(
+    dc: str,
+    access_token: str,
+) -> List[Dict[str, Any]]:
+    """
+    List Zoho Projects portals accessible to the current access token.
+    Requires OAuth scope: ZohoProjects.portals.READ.
+    GET /api/v3/portals
+    """
+    url = f"{projects_base_url(dc)}/api/v3/portals"
+    status, body = api_request(url, access_token, method="GET")
+    data = parse_zoho_response(body, status, "list Projects portals")
+
+    # Projects V3 returns a list of portal objects directly or under 'portals'
+    raw_portals: List[Any] = []
+    if isinstance(data, list):
+        raw_portals = data
+    elif isinstance(data, dict):
+        if "portals" in data and isinstance(data["portals"], list):
+            raw_portals = data["portals"]
+        else:
+            raw_portals = [data]
+
+    results: List[Dict[str, Any]] = []
+    for item in raw_portals:
+        if isinstance(item, dict):
+            portal_id = str(item.get("id") or item.get("id_string") or "").strip()
+            name = str(item.get("portal_name") or item.get("name") or "").strip()
+            if portal_id:
+                results.append({
+                    "portal_id": portal_id,
+                    "name": name,
+                    "is_default_portal": bool(item.get("is_default_portal", False) or item.get("default", False)),
+                    "project_plan": str(item.get("project_plan") or item.get("plan") or "").strip(),
+                })
+    return results

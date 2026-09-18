@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Books organization and Projects portal discovery via `scripts/discover.py`, resolving [issue #10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10). The helpers call `GET /books/v3/organizations` and `GET /api/v3/portals`, print IDs plus non-secret metadata, and support named profiles and JSON output.
+- Multi-host Self Client deployment guidance with per-host refresh-token isolation, named-profile separation, password-manager transfer rules, and the 20-active-refresh-token limit, resolving [issue #6](https://github.com/sprintberlin/zoho-attachment-bridge/issues/6).
 - Local file size pre-check before multipart construction across all targets, resolving [issue #2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2).
   Enforces documented defaults (7 MB for Books expense receipts, 5 MB for Books
   bill attachments, 250 MB for WorkDrive). CRM record attachments have no

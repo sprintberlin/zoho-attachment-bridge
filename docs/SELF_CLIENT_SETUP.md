@@ -71,13 +71,16 @@ These four scopes are the minimum for the planned prototype:
 | `ZohoBooks.bills.CREATE` | Upload an attachment to a bill |
 | `ZohoBooks.bills.READ` | Read the bill attachment again to verify the upload |
 
-Optional:
+Optional discovery scopes:
 
 ```text
-ZohoBooks.settings.READ
+ZohoBooks.settings.READ,ZohoProjects.portals.READ
 ```
 
-Add `ZohoBooks.settings.READ` only if the bridge should discover the Books `organization_id` through `GET /organizations`. It is not required when `organization_id` is passed to every call.
+- `ZohoBooks.settings.READ`: `python3 scripts/discover.py books-organizations`
+- `ZohoProjects.portals.READ`: `python3 scripts/discover.py projects-portals`
+
+Neither scope is required when the corresponding IDs are already known and passed to upload commands.
 
 The operation names above are taken from the official Zoho Books API documentation:
 
@@ -145,6 +148,30 @@ The following entries are planning notes for later adapters and must be rechecke
 | Projects | task and comment attachments | app-specific Projects create/read scopes |
 
 Read access is part of the bridge contract. The bridge must verify every upload instead of trusting an HTTP status or success message.
+
+---
+
+
+## Multi-host deployment
+
+Use one Self Client and one refresh token **per host**. Do not copy a refresh token between machines.
+
+| Concept | Purpose |
+|---|---|
+| Separate Self Client / refresh token per host | Revocation, rotation and audit isolation for each agent machine |
+| Named profile (`--profile`) | Multiple Zoho organizations or tenants on the same host |
+
+For every additional host:
+
+1. Create a new Self Client in the correct data center.
+2. Generate a grant with the complete scope set required on that host.
+3. Run `scripts/onboarding.py` locally on that host.
+4. Transfer Client ID, Client Secret and one-time grant code only through a password manager or a local mode-0600 file.
+5. Perform a real upload plus SHA-256 read-back before the host is considered operational.
+
+Zoho allows up to 20 active refresh tokens per user. Creating the 21st invalidates the oldest token. Remove or revoke tokens from decommissioned hosts.
+
+Named profiles do not replace host isolation. They select another organization configuration on the same machine; they are not a mechanism for sharing credentials between machines.
 
 ---
 

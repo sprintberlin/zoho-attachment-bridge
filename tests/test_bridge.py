@@ -1325,3 +1325,150 @@ class TestTokenCache(unittest.TestCase):
             bridge.refresh_access_token("cid", "csec", "rtok", "eu")
             bridge.refresh_access_token("cid", "csec", "rtok", "eu", use_cache=False)
             self.assertEqual(mock_open.call_count, 2)
+
+class TestOrganizationAndPortalDiscovery(unittest.TestCase):
+    """Test Books organization and Projects portal discovery helpers."""
+
+    def test_projects_base_url(self):
+        expected = {
+            "eu": "https://projectsapi.zoho.eu",
+            "com": "https://projectsapi.zoho.com",
+            "ca": "https://projectsapi.zohocloud.ca",
+            "in": "https://projectsapi.zoho.in",
+        }
+        for dc, url in expected.items():
+            self.assertEqual(bridge.projects_base_url(dc), url)
+        with self.assertRaises(ValueError):
+            bridge.projects_base_url("bad_dc")
+
+    def test_parse_books_6024_organizations(self):
+        body = json.dumps({
+            "code": 6024,
+            "message": "This user belongs to multiple organizations",
+            "organizations": [
+                {
+                    "organization_id": "1001",
+                    "name": "Org One",
+                    "is_default_org": True,
+                },
+                {
+                    "organization_id": "1002",
+                    "name": "Org Two",
+                    "is_default_org": False,
+                },
+            ],
+        }).encode("utf-8")
+        parsed = bridge.parse_books_6024_organizations(body)
+        self.assertEqual(len(parsed), 2)
+        self.assertEqual(parsed[0]["organization_id"], "1001")
+        self.assertEqual(parsed[0]["name"], "Org One")
+        self.assertTrue(parsed[0]["is_default_org"])
+        self.assertEqual(parsed[1]["organization_id"], "1002")
+
+    def test_parse_books_6024_invalid_body_returns_empty(self):
+        self.assertEqual(bridge.parse_books_6024_organizations(b"not json"), [])
+        self.assertEqual(bridge.parse_books_6024_organizations(b"{}"), [])
+
+    def test_parse_books_6024_error_info_shape(self):
+        body = json.dumps({
+            "code": 6024,
+            "message": "This user belongs to multiple organizations",
+            "error_info": {
+                "organizations": [
+                    {"id": "2001", "organization_name": "Nested Org", "is_default_org": False}
+                ]
+            },
+        }).encode("utf-8")
+        parsed = bridge.parse_books_6024_organizations(body)
+        self.assertEqual(parsed[0]["organization_id"], "2001")
+        self.assertEqual(parsed[0]["name"], "Nested Org")
+
+    @patch("bridge.api_request")
+    def test_list_books_organizations_success(self, mock_api):
+        mock_api.return_value = (200, json.dumps({
+            "code": 0,
+            "message": "success",
+            "organizations": [
+                {
+                    "organization_id": "123456",
+                    "name": "SprintCX GmbH",
+                    "is_default_org": True,
+                    "currency_code": "EUR",
+                    "time_zone": "Europe/Berlin",
+                }
+            ],
+        }).encode("utf-8"))
+
+        orgs = bridge.list_books_organizations("eu", "mock_access_token")
+        self.assertEqual(len(orgs), 1)
+        self.assertEqual(orgs[0]["organization_id"], "123456")
+        self.assertEqual(orgs[0]["name"], "SprintCX GmbH")
+        self.assertTrue(orgs[0]["is_default_org"])
+        mock_api.assert_called_once_with(
+            "https://www.zohoapis.eu/books/v3/organizations",
+            "mock_access_token",
+            method="GET",
+        )
+
+    @patch("bridge.api_request")
+    def test_list_projects_portals_success(self, mock_api):
+        mock_api.return_value = (200, json.dumps([
+            {
+                "id": "647154632",
+                "portal_name": "sprintcx",
+                "is_default_portal": True,
+                "project_plan": "Enterprise",
+            }
+        ]).encode("utf-8"))
+
+        portals = bridge.list_projects_portals("eu", "mock_access_token")
+        self.assertEqual(len(portals), 1)
+        self.assertEqual(portals[0]["portal_id"], "647154632")
+        self.assertEqual(portals[0]["name"], "sprintcx")
+        self.assertTrue(portals[0]["is_default_portal"])
+        mock_api.assert_called_once_with(
+            "https://projectsapi.zoho.eu/api/v3/portals",
+            "mock_access_token",
+            method="GET",
+        )
+
+
+class TestDiscoverCli(unittest.TestCase):
+    """Test scripts/discover.py CLI execution."""
+
+    @patch("discover.list_books_organizations")
+    @patch("discover.refresh_access_token", return_value="tok123")
+    @patch("discover.load_env")
+    def test_discover_books_organizations_cli(self, mock_env, mock_tok, mock_list):
+        import discover
+        mock_env.return_value = {
+            "client_id": "cid", "client_secret": "csec", "refresh_token": "reftok", "dc": "eu"
+        }
+        mock_list.return_value = [
+            {"organization_id": "111", "name": "OrgA", "is_default_org": True, "currency_code": "EUR", "time_zone": "CET"}
+        ]
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+            ret = discover.main(["books-organizations"])
+            self.assertEqual(ret, 0)
+            out = mock_out.getvalue()
+            self.assertIn("111", out)
+            self.assertIn("OrgA", out)
+
+    @patch("discover.list_projects_portals")
+    @patch("discover.refresh_access_token", return_value="tok123")
+    @patch("discover.load_env")
+    def test_discover_projects_portals_cli_json(self, mock_env, mock_tok, mock_list):
+        import discover
+        mock_env.return_value = {
+            "client_id": "cid", "client_secret": "csec", "refresh_token": "reftok", "dc": "eu"
+        }
+        mock_list.return_value = [
+            {"portal_id": "999", "name": "PortalX", "is_default_portal": False, "project_plan": "Free"}
+        ]
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_out:
+            ret = discover.main(["projects-portals", "--json"])
+            self.assertEqual(ret, 0)
+            out = mock_out.getvalue()
+            data = json.loads(out)
+            self.assertEqual(len(data), 1)
+            self.assertEqual(data[0]["portal_id"], "999")

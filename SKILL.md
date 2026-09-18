@@ -71,50 +71,24 @@ Zoho enforces different allowlists per endpoint:
 
 Reject before multipart: Books receipts 7 MB, bills 5 MB, WorkDrive 250 MB. CRM has no documented default. Override with `--max-bytes`; target and profile env variables are listed in the README.
 
-## Onboarding
+## Scopes & Onboarding
+
+Run `python3 scripts/onboarding.py`. Minimale Scopes:
+- Books: `ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBooks.bills.READ`
+- CRM: `ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachments.READ`
+- WorkDrive: `WorkDrive.files.CREATE,WorkDrive.files.READ`
+- Optional Discovery: `ZohoBooks.settings.READ,ZohoProjects.portals.READ`
+
+Never paste credentials into chats or emails. Details: `docs/SELF_CLIENT_SETUP.md`.
+
+## Discover IDs
 
 ```bash
-python3 scripts/onboarding.py
+python3 scripts/discover.py books-organizations [--profile <name>] [--json]
+python3 scripts/discover.py projects-portals [--profile <name>] [--json]
 ```
 
-For the first Books prototype, create the Self Client grant with this exact comma-separated scope string:
-
-```text
-ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBooks.bills.READ
-```
-
-- `expenses.CREATE`: upload expense receipts and attachments
-- `expenses.READ`: verify expense uploads by reading them back
-- `bills.CREATE`: upload bill attachments
-- `bills.READ`: verify bill uploads by reading them back
-- Optional `ZohoBooks.settings.READ`: discover `organization_id` through `GET /organizations`
-
-Do not add `ZohoBooks.fullaccess.ALL`. Scopes are fixed when the refresh token is created; adding one later requires a new grant and refresh token.
-
-For CRM record attachments, create a separate refresh token (or regenerate the complete grant) with:
-
-```text
-ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachments.READ
-```
-
-- `ZohoCRM.modules.ALL`: access to the parent record module named with `--module`.
-- `ZohoCRM.modules.attachments.CREATE`: upload the multipart `file` attachment.
-- `ZohoCRM.modules.attachments.READ`: list the attachment and download it for mandatory SHA-256 verification.
-
-The parent module scope and both attachment scopes are required. Zoho scopes are fixed when the refresh token is created, so an existing token missing any one of them needs a new grant and refresh token.
-
-For WorkDrive file uploads and new versions, create a refresh token with:
-
-```text
-WorkDrive.files.CREATE,WorkDrive.files.READ
-```
-
-- `WorkDrive.files.CREATE`: upload files and new versions to `POST /workdrive/api/v1/upload` (multipart `content`, max 250 MB).
-- `WorkDrive.files.READ`: download the uploaded file via `GET https://download.zoho.<dc>/v1/workdrive/download/{resource_id}` for mandatory SHA-256 verification.
-
-Interactive: walks through the Self Client grant flow, exchanges the grant token, and writes the four variables to the env file (mode 0600, unrelated lines preserved).
-
-Manual steps are documented in `docs/SELF_CLIENT_SETUP.md`. Verify the setup with a real upload via `zoho_attach.py`.
+Scopes: `ZohoBooks.settings.READ` for Books organizations, `ZohoProjects.portals.READ` for Projects portals. Output contains IDs and non-secret metadata only.
 
 ## Usage
 

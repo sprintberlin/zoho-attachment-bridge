@@ -201,6 +201,16 @@ export ZOHO_BRIDGE_ACME_DC="com"
 python3 scripts/zoho_attach.py --profile acme ...
 ```
 
+Discover identifiers without printing tokens:
+
+```bash
+# Requires ZohoBooks.settings.READ
+python3 scripts/discover.py books-organizations [--profile acme] [--json]
+
+# Requires ZohoProjects.portals.READ
+python3 scripts/discover.py projects-portals [--profile acme] [--json]
+```
+
 > **⚠️ Uploading a customer file into the wrong organization is the worst failure mode this tool has.** Always confirm the target organization before running against a shared environment.
 
 ---
@@ -291,6 +301,7 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 | Books | expense receipt | implemented, verified live | — |
 | Books | bill attachment | implemented, unit tests only | [#1](https://github.com/sprintberlin/zoho-attachment-bridge/issues/1) |
 | Books / CRM / WorkDrive | file size pre-check | implemented, configurable per target | [#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2) |
+| Books / Projects | organization and portal discovery | implemented, unit tests only | [#10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10) |
 | CRM | record attachment | implemented, mocked upload/list/download verification | [#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3) |
 | WorkDrive | file upload, new version | implemented, mocked upload/download verification | [#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9) |
 | Projects | task and comment attachment | planned | [#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4) |

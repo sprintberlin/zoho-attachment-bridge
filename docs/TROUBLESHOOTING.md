@@ -131,9 +131,16 @@ a new grant with the complete scope list rather than reusing an incompatible tok
 {"code": 6024, "message": "This user belongs to multiple organizations, hence the parameter CompanyID/CompanyName is required..."}
 ```
 
-Pass `--organization-id` or set `ZOHO_BRIDGE_BOOKS_ORG_ID`. Helpfully, the error
-response itself lists the available organizations under `error_info`, including
-which one is the default.
+Pass `--organization-id` or set `ZOHO_BRIDGE_BOOKS_ORG_ID`. List accessible
+organizations with:
+
+```bash
+python3 scripts/discover.py books-organizations
+```
+
+This requires `ZohoBooks.settings.READ`. If the token lacks that scope, the 6024
+payload may still include candidate organizations; `parse_books_6024_organizations`
+extracts IDs and names from `organizations` or `error_info` without printing tokens.
 
 ---
 
