@@ -162,7 +162,7 @@ The bridge rejects oversized files locally before building the multipart body:
 |---|---:|
 | `expense-receipt` | 7 MB |
 | `bill-attachment` | 5 MB |
-| `record-attachment` | 20 MB |
+| `record-attachment` | — (configurable) |
 | `file-upload`, `new-version` | 250 MB |
 
 Override per call with `--max-bytes <bytes>` or set `ZOHO_BRIDGE_MAX_BYTES_<TARGET>` (e.g. `ZOHO_BRIDGE_MAX_BYTES_EXPENSE_RECEIPT=10485760`). Named profiles use `ZOHO_BRIDGE_<PROFILE>_MAX_BYTES_<TARGET>`.
@@ -327,7 +327,7 @@ Both a new file and a new version use the same upload endpoint. The `override-na
 - Request the **narrowest scope** per app. Do not use `ZohoBooks.fullaccess.ALL`. For CRM record attachments, `ZohoCRM.modules.ALL` is additionally needed for the parent module, alongside `ZohoCRM.modules.attachments.CREATE` and `ZohoCRM.modules.attachments.READ`. WorkDrive uploads need `WorkDrive.files.CREATE` and `WorkDrive.files.READ`.
 - WorkDrive resource IDs are opaque strings. Resolve them through the WorkDrive MCP skill and never derive one from a path or file name.
 - Revoke unused Self Clients in the API Console.
-- Uploads are subject to Zoho rate limits and per-plan file size limits. The bridge backs off on HTTP 429. Local file size pre-checks enforce documented limits before upload (Books 7MB / 5MB, CRM 20MB, WorkDrive 250MB) and are configurable via `--max-bytes` or env vars ([#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2)).
+- Uploads are subject to Zoho rate limits and per-plan file size limits. The bridge backs off on HTTP 429. Local file size pre-checks enforce documented limits before upload (Books 7 MB / 5 MB, WorkDrive 250 MB; CRM only when configured) via `--max-bytes` or env vars ([#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2)).
 
 ---
 

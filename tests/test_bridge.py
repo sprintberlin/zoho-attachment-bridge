@@ -171,9 +171,7 @@ class TestFileSizeValidation(unittest.TestCase):
         self.assertEqual(
             bridge.get_max_upload_bytes("bill-attachment"), 5 * 1024 * 1024
         )
-        self.assertEqual(
-            bridge.get_max_upload_bytes("record-attachment"), 20 * 1024 * 1024
-        )
+        self.assertIsNone(bridge.get_max_upload_bytes("record-attachment"))
         self.assertEqual(
             bridge.get_max_upload_bytes("file-upload"), 250 * 1024 * 1024
         )
@@ -231,6 +229,26 @@ class TestFileSizeValidation(unittest.TestCase):
                     tmp_path, "bill-attachment", override_bytes=5
                 )
             self.assertIn("bill-attachment", str(ctx.exception))
+            self.assertIn("configured limit", str(ctx.exception))
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("bridge.api_request")
+    def test_cli_override_reaches_upload_function(self, mock_api):
+        mock_api.return_value = (200, b'{"code":0}')
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"larger-than-five-bytes")
+            tmp_path = tmp.name
+        try:
+            with patch.dict(os.environ, {"ZOHO_BRIDGE_MAX_BYTES_BILL_ATTACHMENT": "5"}, clear=False):
+                with self.assertRaises(ValueError) as ctx:
+                    bridge.upload_books_bill_attachment(
+                        dc="eu",
+                        access_token="tok",
+                        organization_id="123",
+                        bill_id="456",
+                        file_path=tmp_path,
+                    )
             self.assertIn("configured limit", str(ctx.exception))
         finally:
             os.unlink(tmp_path)
@@ -986,6 +1004,10 @@ class TestCliZohoAttach(unittest.TestCase):
             self.assertEqual(ret, 0)
             mock_tok.assert_called_once()
             mock_up.assert_called_once()
+            self.assertEqual(
+                mock_up.call_args.kwargs["max_bytes"],
+                bridge.DEFAULT_MAX_UPLOAD_BYTES["expense-receipt"],
+            )
             mock_ver.assert_called_once()
         finally:
             if os.path.exists(tmp_path):

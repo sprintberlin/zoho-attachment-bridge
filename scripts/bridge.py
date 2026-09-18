@@ -77,12 +77,11 @@ WORKDRIVE_MAX_UPLOAD_BYTES: int = 250 * 1024 * 1024
 #   https://www.zoho.com/us/books/welcome-guide.html#record-expenses
 # Bill attachments: Zoho Books Help, "a maximum of 5 files, each of 5 MB"
 #   https://www.zoho.com/us/books/help/bills/other-actions.html#attach-files-to-bill
-# CRM record attachments: Zoho CRM v8 Files API, "maximum size of each file is 20MB"
-#   https://www.zoho.com/crm/developer/docs/api/v8/upload-files-to-zfs.html
+# CRM record attachments have no documented size on the record-attachment
+# endpoint. A limit is only applied when configured.
 DEFAULT_MAX_UPLOAD_BYTES: Dict[str, int] = {
     "expense-receipt": 7 * 1024 * 1024,
     "bill-attachment": 5 * 1024 * 1024,
-    "record-attachment": 20 * 1024 * 1024,
     "file-upload": WORKDRIVE_MAX_UPLOAD_BYTES,
     "new-version": WORKDRIVE_MAX_UPLOAD_BYTES,
 }
@@ -98,7 +97,6 @@ _TARGET_LIMIT_ENV: Dict[str, str] = {
 _LIMIT_LABELS: Dict[str, str] = {
     "expense-receipt": "7 MB",
     "bill-attachment": "5 MB",
-    "record-attachment": "20 MB",
     "file-upload": "250 MB",
     "new-version": "250 MB",
 }
@@ -641,9 +639,9 @@ def get_max_upload_bytes(
     target: str,
     override_bytes: Optional[int] = None,
     profile: Optional[str] = None,
-) -> int:
+) -> Optional[int]:
     """
-    Return the maximum upload size in bytes for a target.
+    Return the maximum upload size in bytes for a target, or None if unconstrained.
     Precedence:
       1. Explicit override_bytes parameter (e.g. from CLI flag)
       2. Environment variable ZOHO_BRIDGE_[<PROFILE>_]MAX_BYTES_<TARGET>
@@ -655,10 +653,10 @@ def get_max_upload_bytes(
             raise ValueError(f"Upload size limit must be positive, got {override_bytes}")
         return override_bytes
 
-    if target not in DEFAULT_MAX_UPLOAD_BYTES:
+    if target not in _TARGET_LIMIT_ENV:
+        valid = sorted(set(list(DEFAULT_MAX_UPLOAD_BYTES.keys()) + list(_TARGET_LIMIT_ENV.keys())))
         raise ValueError(
-            f"Unknown target '{target}'. "
-            f"Valid targets: {', '.join(sorted(DEFAULT_MAX_UPLOAD_BYTES.keys()))}"
+            f"Unknown target '{target}'. Valid targets: {', '.join(valid)}"
         )
 
     env_suffix = _TARGET_LIMIT_ENV[target].removeprefix("ZOHO_BRIDGE_")
@@ -681,7 +679,7 @@ def get_max_upload_bytes(
             except ValueError as exc:
                 raise ValueError(f"Invalid integer in environment variable {var}: '{val}'") from exc
 
-    return DEFAULT_MAX_UPLOAD_BYTES[target]
+    return DEFAULT_MAX_UPLOAD_BYTES.get(target)
 
 
 def validate_file_size(
@@ -696,7 +694,7 @@ def validate_file_size(
     """
     size = os.path.getsize(file_path)
     limit = get_max_upload_bytes(target, override_bytes=override_bytes, profile=profile)
-    if size > limit:
+    if limit is not None and size > limit:
         label = _LIMIT_LABELS.get(target, f"{limit} bytes")
         if limit != DEFAULT_MAX_UPLOAD_BYTES.get(target):
             limit_desc = f"{limit} bytes (configured limit)"
@@ -968,13 +966,14 @@ def upload_books_expense_receipt(
     organization_id: str,
     expense_id: str,
     file_path: str,
+    max_bytes: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Upload expense receipt using multipart/form-data.
     POST /api/v3/expenses/{expense_id}/receipt?organization_id={org_id}
     """
     validate_file_extension(file_path, "expense-receipt")
-    validate_file_size(file_path, "expense-receipt")
+    validate_file_size(file_path, "expense-receipt", override_bytes=max_bytes)
     body, content_type = build_multipart_body(file_path, field_name="receipt")
     url = (
         f"{books_base_url(dc)}/expenses/{expense_id}/receipt"
@@ -992,13 +991,14 @@ def upload_books_bill_attachment(
     organization_id: str,
     bill_id: str,
     file_path: str,
+    max_bytes: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Upload bill attachment using multipart/form-data.
     POST /api/v3/bills/{bill_id}/attachment?organization_id={org_id}
     """
     validate_file_extension(file_path, "bill-attachment")
-    validate_file_size(file_path, "bill-attachment")
+    validate_file_size(file_path, "bill-attachment", override_bytes=max_bytes)
     body, content_type = build_multipart_body(file_path, field_name="attachment")
     url = (
         f"{books_base_url(dc)}/bills/{bill_id}/attachment"
@@ -1118,6 +1118,7 @@ def upload_crm_record_attachment(
     module: str,
     record_id: str,
     file_path: str,
+    max_bytes: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Upload attachment to a CRM record using multipart/form-data.
@@ -1125,7 +1126,7 @@ def upload_crm_record_attachment(
     Multipart field name: 'file'
     """
     validate_file_extension(file_path, "record-attachment")
-    validate_file_size(file_path, "record-attachment")
+    validate_file_size(file_path, "record-attachment", override_bytes=max_bytes)
     module = validate_crm_module(module)
     record_id = validate_zoho_id(record_id, "CRM record ID")
     body, content_type = build_multipart_body(file_path, field_name="file")
@@ -1261,6 +1262,7 @@ def upload_workdrive_file(
     file_path: str,
     filename: Optional[str] = None,
     override_name_exist: bool = False,
+    max_bytes: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Upload a binary file into a WorkDrive folder using multipart/form-data.
@@ -1278,7 +1280,7 @@ def upload_workdrive_file(
     """
     target = "new-version" if override_name_exist else "file-upload"
     validate_file_extension(file_path, target)
-    validate_file_size(file_path, target)
+    validate_file_size(file_path, target, override_bytes=max_bytes)
     parent_id = validate_workdrive_resource_id(parent_id, "WorkDrive parent folder ID")
 
     extra_fields: Dict[str, str] = {

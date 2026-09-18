@@ -67,6 +67,10 @@ Zoho enforces different allowlists per endpoint:
 | `file-upload` (WorkDrive) | Zoho enforces blocked/allowed extensions per organization policy; the bridge requires a filename extension and leaves enforcement to the API |
 | `new-version` (WorkDrive) | Same policy as `file-upload`; creates a new top version over an existing file with the same name |
 
+## File size limits
+
+Reject before multipart: Books receipts 7 MB, bills 5 MB, WorkDrive 250 MB. CRM has no documented default. Override with `--max-bytes`; target and profile env variables are listed in the README.
+
 ## Onboarding
 
 ```bash

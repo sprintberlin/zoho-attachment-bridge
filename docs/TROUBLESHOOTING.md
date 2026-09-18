@@ -38,8 +38,9 @@ The bridge validates file size locally before building the multipart body:
 |---|---|---|
 | `expense-receipt` | 7 MB | `ZOHO_BRIDGE_MAX_BYTES_EXPENSE_RECEIPT` |
 | `bill-attachment` | 5 MB | `ZOHO_BRIDGE_MAX_BYTES_BILL_ATTACHMENT` |
-| `record-attachment` | 20 MB | `ZOHO_BRIDGE_MAX_BYTES_RECORD_ATTACHMENT` |
-| `file-upload`, `new-version` | 250 MB | `ZOHO_BRIDGE_MAX_BYTES_FILE_UPLOAD` |
+| `record-attachment` | — (configurable) | `ZOHO_BRIDGE_MAX_BYTES_RECORD_ATTACHMENT` |
+| `file-upload` | 250 MB | `ZOHO_BRIDGE_MAX_BYTES_FILE_UPLOAD` |
+| `new-version` | 250 MB | `ZOHO_BRIDGE_MAX_BYTES_NEW_VERSION` |
 
 You can also pass `--max-bytes <bytes>` on the CLI to override the limit for a single run.
 

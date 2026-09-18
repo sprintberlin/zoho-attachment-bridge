@@ -33,6 +33,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from bridge import (
     extract_workdrive_resource_id,
+    get_max_upload_bytes,
     load_env,
     refresh_access_token,
     sha256_file,
@@ -141,11 +142,15 @@ def main(cli_args=None) -> int:
         return 1
 
     try:
-        validate_file_size(
-            str(file_path),
+        effective_max_bytes = get_max_upload_bytes(
             args.target,
             override_bytes=args.max_bytes,
             profile=args.profile,
+        )
+        validate_file_size(
+            str(file_path),
+            args.target,
+            override_bytes=effective_max_bytes,
         )
     except ValueError as exc:
         print(f"Validation error: {exc}", file=sys.stderr)
@@ -234,6 +239,7 @@ def main(cli_args=None) -> int:
                 organization_id=org_id,
                 expense_id=args.id,
                 file_path=str(file_path),
+                max_bytes=effective_max_bytes,
             )
         elif args.app == "books" and args.target == "bill-attachment":
             res = upload_books_bill_attachment(
@@ -242,6 +248,7 @@ def main(cli_args=None) -> int:
                 organization_id=org_id,
                 bill_id=args.id,
                 file_path=str(file_path),
+                max_bytes=effective_max_bytes,
             )
         elif args.app == "crm" and args.target == "record-attachment":
             res = upload_crm_record_attachment(
@@ -250,6 +257,7 @@ def main(cli_args=None) -> int:
                 module=args.module,
                 record_id=args.id,
                 file_path=str(file_path),
+                max_bytes=effective_max_bytes,
             )
         elif args.app == "workdrive":
             res = upload_workdrive_file(
@@ -259,6 +267,7 @@ def main(cli_args=None) -> int:
                 file_path=str(file_path),
                 filename=args.filename,
                 override_name_exist=(args.target == "new-version"),
+                max_bytes=effective_max_bytes,
             )
         else:
             print(f"Error: Unsupported app/target: {args.app}/{args.target}", file=sys.stderr)
