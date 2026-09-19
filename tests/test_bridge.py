@@ -130,6 +130,17 @@ class TestFileValidationAndMime(unittest.TestCase):
         with self.assertRaises(ValueError):
             bridge.validate_file_extension("extensionless", "record-attachment")
 
+    def test_journal_attachment_has_no_invented_allowlist(self):
+        # Journals API publishes no extension allowlist. Require an extension
+        # and leave type enforcement to Zoho.
+        valid = ["receipt.pdf", "scan.webp", "notes.csv", "archive.zip"]
+        for fn in valid:
+            ext = bridge.validate_file_extension(fn, "journal-attachment")
+            self.assertTrue(ext.startswith("."))
+
+        with self.assertRaises(ValueError):
+            bridge.validate_file_extension("extensionless", "journal-attachment")
+
     def test_unknown_target_raises(self):
         with self.assertRaises(ValueError):
             bridge.validate_file_extension("file.pdf", "unknown-target")
@@ -172,6 +183,7 @@ class TestFileSizeValidation(unittest.TestCase):
             bridge.get_max_upload_bytes("bill-attachment"), 5 * 1024 * 1024
         )
         self.assertIsNone(bridge.get_max_upload_bytes("record-attachment"))
+        self.assertIsNone(bridge.get_max_upload_bytes("journal-attachment"))
         self.assertEqual(
             bridge.get_max_upload_bytes("file-upload"), 250 * 1024 * 1024
         )
@@ -563,6 +575,165 @@ class TestBooksOperationsAndVerification(unittest.TestCase):
         )
         self.assertTrue(verified)
         self.assertIn("Verified", msg)
+
+    @patch("bridge.api_request")
+    def test_upload_books_journal_attachment(self, mock_api):
+        mock_api.return_value = (201, json.dumps({
+            "code": 0,
+            "message": "Your file has been successfully attached to the journal.",
+        }).encode("utf-8"))
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"PDF journal attachment data")
+            tmp_path = tmp.name
+
+        try:
+            res = bridge.upload_books_journal_attachment(
+                dc="eu",
+                access_token="tok",
+                organization_id="12345",
+                journal_id="460000000038001",
+                file_path=tmp_path,
+            )
+            self.assertEqual(res["code"], 0)
+            args, kwargs = mock_api.call_args
+            self.assertIn(
+                "/journals/460000000038001/attachment?organization_id=12345",
+                args[0],
+            )
+            self.assertEqual(kwargs.get("method"), "POST")
+            self.assertIn(b'name="attachment"', kwargs["data"])
+            self.assertIn(b"PDF journal attachment data", kwargs["data"])
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    @patch("bridge.download_books_journal_document")
+    @patch("bridge.get_books_journal")
+    def test_verify_books_journal_attachment_match(self, mock_get, mock_download):
+        raw_bytes = b"Journal document payload"
+        expected_sha = bridge.sha256_bytes(raw_bytes)
+        mock_get.return_value = {
+            "journal": {
+                "journal_id": "460000000038001",
+                "documents": [
+                    {
+                        "document_id": "460000000123001",
+                        "file_name": "receipt.pdf",
+                    }
+                ],
+            }
+        }
+        mock_download.return_value = raw_bytes
+
+        verified, msg = bridge.verify_books_journal_attachment(
+            dc="eu",
+            access_token="tok",
+            organization_id="12345",
+            journal_id="460000000038001",
+            file_name="receipt.pdf",
+            expected_sha256=expected_sha,
+        )
+        self.assertTrue(verified)
+        self.assertIn("Verified", msg)
+        mock_download.assert_called_once_with(
+            "eu", "tok", "12345", "460000000038001", "460000000123001"
+        )
+
+    @patch("bridge.download_books_journal_document")
+    @patch("bridge.get_books_journal")
+    def test_verify_books_journal_attachment_mismatch(self, mock_get, mock_download):
+        raw_bytes = b"Corrupted journal bytes"
+        expected_sha = bridge.sha256_bytes(b"Original file bytes")
+        mock_get.return_value = {
+            "journal": {
+                "journal_id": "460000000038001",
+                "documents": [
+                    {
+                        "document_id": "460000000123001",
+                        "file_name": "receipt.pdf",
+                    }
+                ],
+            }
+        }
+        mock_download.return_value = raw_bytes
+
+        verified, msg = bridge.verify_books_journal_attachment(
+            dc="eu",
+            access_token="tok",
+            organization_id="12345",
+            journal_id="460000000038001",
+            file_name="receipt.pdf",
+            expected_sha256=expected_sha,
+        )
+        self.assertFalse(verified)
+        self.assertIn("mismatch", msg)
+
+    @patch("bridge.get_books_journal")
+    def test_verify_books_journal_attachment_not_found(self, mock_get):
+        mock_get.return_value = {
+            "journal": {
+                "journal_id": "460000000038001",
+                "documents": [],
+            }
+        }
+        verified, msg = bridge.verify_books_journal_attachment(
+            dc="eu",
+            access_token="tok",
+            organization_id="12345",
+            journal_id="460000000038001",
+            file_name="missing.pdf",
+            expected_sha256="a" * 64,
+        )
+        self.assertFalse(verified)
+        self.assertIn("not found", msg)
+
+    @patch("bridge.get_books_journal")
+    def test_verify_books_journal_attachment_rejects_ambiguous_filename(self, mock_get):
+        mock_get.return_value = {
+            "journal": {
+                "journal_id": "460000000038001",
+                "documents": [
+                    {"document_id": "1", "file_name": "dup.pdf"},
+                    {"document_id": "2", "file_name": "dup.pdf"},
+                ],
+            }
+        }
+        verified, msg = bridge.verify_books_journal_attachment(
+            dc="eu",
+            access_token="tok",
+            organization_id="12345",
+            journal_id="460000000038001",
+            file_name="dup.pdf",
+            expected_sha256="a" * 64,
+        )
+        self.assertFalse(verified)
+        self.assertIn("multiple journal documents", msg)
+
+    @patch("bridge.api_request")
+    def test_download_books_journal_document_uses_document_path(self, mock_api):
+        mock_api.return_value = (200, b"%PDF-1.4 journal bytes")
+        data = bridge.download_books_journal_document(
+            "eu", "tok", "12345", "460000000038001", "460000000123001"
+        )
+        self.assertEqual(data, b"%PDF-1.4 journal bytes")
+        mock_api.assert_called_once_with(
+            "https://www.zohoapis.eu/books/v3/journals/460000000038001/documents/460000000123001?organization_id=12345",
+            "tok",
+            method="GET",
+        )
+
+    def test_journal_ids_reject_injection(self):
+        with self.assertRaises(ValueError):
+            bridge.validate_zoho_id("123?fields=all", "journal ID")
+        with self.assertRaises(ValueError):
+            bridge.upload_books_journal_attachment(
+                dc="eu",
+                access_token="tok",
+                organization_id="12345",
+                journal_id="460000000038001/../attachment",
+                file_path="receipt.pdf",
+            )
 
 
 class TestCrmOperationsAndVerification(unittest.TestCase):
@@ -1009,6 +1180,44 @@ class TestCliZohoAttach(unittest.TestCase):
                 bridge.DEFAULT_MAX_UPLOAD_BYTES["expense-receipt"],
             )
             mock_ver.assert_called_once()
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    @patch("zoho_attach.verify_books_journal_attachment", return_value=(True, "Verified match"))
+    @patch("zoho_attach.upload_books_journal_attachment", return_value={"code": 0, "message": "Uploaded"})
+    @patch("zoho_attach.refresh_access_token", return_value="mock_access_token")
+    @patch("zoho_attach.load_env")
+    def test_successful_journal_upload_and_verification(self, mock_env, mock_tok, mock_up, mock_ver):
+        mock_env.return_value = {
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "reftok",
+            "dc": "eu",
+            "books_org_id": "org123",
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"Journal receipt bytes")
+            tmp_path = tmp.name
+
+        try:
+            ret = zoho_attach.main([
+                "--app", "books",
+                "--target", "journal-attachment",
+                "--id", "460000000038001",
+                "--file", tmp_path,
+            ])
+            self.assertEqual(ret, 0)
+            mock_up.assert_called_once()
+            upload_kwargs = mock_up.call_args.kwargs
+            self.assertEqual(upload_kwargs["journal_id"], "460000000038001")
+            self.assertEqual(upload_kwargs["organization_id"], "org123")
+            mock_ver.assert_called_once()
+            verify_kwargs = mock_ver.call_args.kwargs
+            self.assertEqual(verify_kwargs["journal_id"], "460000000038001")
+            self.assertEqual(verify_kwargs["file_name"], Path(tmp_path).name)
+            self.assertIn("expected_sha256", verify_kwargs)
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)

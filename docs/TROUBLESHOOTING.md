@@ -38,6 +38,7 @@ The bridge validates file size locally before building the multipart body:
 |---|---|---|
 | `expense-receipt` | 7 MB | `ZOHO_BRIDGE_MAX_BYTES_EXPENSE_RECEIPT` |
 | `bill-attachment` | 5 MB | `ZOHO_BRIDGE_MAX_BYTES_BILL_ATTACHMENT` |
+| `journal-attachment` | — (configurable) | `ZOHO_BRIDGE_MAX_BYTES_JOURNAL_ATTACHMENT` |
 | `record-attachment` | — (configurable) | `ZOHO_BRIDGE_MAX_BYTES_RECORD_ATTACHMENT` |
 | `file-upload` | 250 MB | `ZOHO_BRIDGE_MAX_BYTES_FILE_UPLOAD` |
 | `new-version` | 250 MB | `ZOHO_BRIDGE_MAX_BYTES_NEW_VERSION` |
@@ -54,10 +55,12 @@ Zoho enforces a different allowlist per endpoint, and they are not consistent:
 |---|---|
 | `expense-receipt` | gif, png, jpeg, jpg, bmp, pdf, xls, xlsx, doc, docx |
 | `bill-attachment` | gif, png, jpeg, jpg, bmp, pdf |
+| `journal-attachment` | no published allowlist; filename extension required |
 
 Note that spreadsheets and Word documents are accepted for expense receipts but
-**not** for bill attachments. The bridge rejects violations locally before
-spending an API call.
+**not** for bill attachments. The bridge rejects those violations locally before
+spending an API call. Journals publish no allowlist, so the bridge only requires
+a filename extension.
 
 For WorkDrive, allowed and blocked extensions are configured per organization.
 The bridge only requires an extension, then lets WorkDrive enforce the real
@@ -120,6 +123,17 @@ afterwards — generate a new grant token with the complete scope list.
 Common case: `GET /organizations` requires `ZohoBooks.settings.READ`, which is
 not part of the minimal upload scope set. Likewise, deleting a record requires a
 `DELETE` scope that the upload-only setup deliberately omits.
+
+Journal attachments (`--target journal-attachment`) need both accountant scopes:
+
+```text
+ZohoBooks.accountants.CREATE,ZohoBooks.accountants.READ
+```
+
+`CREATE` uploads the file; `READ` lists the journal documents and downloads the
+just-uploaded document for SHA-256 verification. A Books token that only has
+expense and bill scopes returns HTTP 401 `You are not authorized to perform this
+operation` on journal upload and document download.
 
 For WorkDrive, both scopes are mandatory:
 

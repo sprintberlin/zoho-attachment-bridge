@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] — 2026-09-18
 
 ### Added
+- Books journal attachment adapter with `--app books --target journal-attachment`, resolving [issue #12](https://github.com/sprintberlin/zoho-attachment-bridge/issues/12).
+  Multipart upload uses `POST /books/v3/journals/{journal_id}/attachment` with
+  form field `attachment`. Mandatory SHA-256 read-back lists the journal's
+  `documents[]` via `GET /journals/{journal_id}` and downloads
+  `GET /journals/{journal_id}/documents/{document_id}`. Journals publish no
+  file-type allowlist and no size limit; the bridge requires a filename
+  extension and only caps size when configured. Requires
+  `ZohoBooks.accountants.CREATE` and `ZohoBooks.accountants.READ`.
 - Projects task and comment attachment adapter with `--app projects --target task-attachment|comment-attachment`,
   resolving [issue #4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4).
 - Multipart task upload using `POST https://projectsapi.<dc>/restapi/portal/{portal_id}/projects/{project_id}/tasks/{task_id}/attachments/`
   with form field `uploaddoc` and mandatory SHA-256 verification against the task attachment list and download URL.
 - Multipart comment upload using `POST https://projectsapi.<dc>/restapi/portal/{portal_id}/projects/{project_id}/tasks/{task_id}/comments/`
   with form fields `uploaddoc` and `content`.
-- Mock-only unit test coverage (95 tests total) covering Projects URL composition, numeric ID validation,
+- Mock-only unit test coverage (104 tests total across the suite) covering Projects URL composition, numeric ID validation,
   extension validation, multipart requests, and SHA-256 verification.
 
 - Books organization and Projects portal discovery via `scripts/discover.py`, resolving [issue #10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10). The helpers call `GET /books/v3/organizations` and `GET /api/v3/portals`, print IDs plus non-secret metadata, and support named profiles and JSON output.

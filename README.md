@@ -18,7 +18,7 @@
 
 ---
 
-> **Status: 0.4.0 (unreleased).** Books expense receipts remain implemented and verified live; CRM v8 record attachments and WorkDrive file/version uploads are implemented with mocked upload/download SHA-256 verification. Bill attachments are implemented but only unit-tested. Next work is in
+> **Status: 0.4.0 (unreleased).** Books expense receipts remain implemented and verified live; CRM v8 record attachments and WorkDrive file/version uploads are implemented with mocked upload/download SHA-256 verification. Bill and journal attachments are implemented but only unit-tested. Next work is in
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) and the [issue tracker](https://github.com/sprintberlin/zoho-attachment-bridge/issues).
 
 ---
@@ -151,6 +151,7 @@ Zoho enforces a different allowlist per endpoint, and the bridge rejects violati
 |---|---|
 | `expense-receipt` | gif, png, jpeg, jpg, bmp, pdf, xls, xlsx, doc, docx |
 | `bill-attachment` | gif, png, jpeg, jpg, bmp, pdf |
+| `journal-attachment` | Zoho Books publishes no extension allowlist for journal attachments; the bridge requires a filename extension and leaves enforcement to the API |
 | `record-attachment` (CRM) | Zoho publishes no extension allowlist for this endpoint; the bridge requires a filename extension and leaves enforcement to the API |
 | `file-upload`, `new-version` (WorkDrive) | Blocked and allowed extensions are an organization policy (API errors `D9236` / `D9237`); the bridge requires a filename extension and enforces the documented 250 MB limit of the multipart endpoint |
 | `task-attachment`, `comment-attachment` (Projects) | Zoho publishes no extension allowlist; the bridge requires a filename extension and leaves enforcement to the API |
@@ -163,6 +164,7 @@ The bridge rejects oversized files locally before building the multipart body:
 |---|---:|
 | `expense-receipt` | 7 MB |
 | `bill-attachment` | 5 MB |
+| `journal-attachment` | — (configurable) |
 | `record-attachment` | — (configurable) |
 | `file-upload`, `new-version` | 250 MB |
 | `task-attachment`, `comment-attachment` | — (configurable) |
@@ -250,6 +252,14 @@ python3 scripts/zoho_attach.py \
   --organization-id 789012345 \
   --file ~/invoices/vendor.pdf
 
+# Journal attachment (manual journals)
+python3 scripts/zoho_attach.py \
+  --app books \
+  --target journal-attachment \
+  --id 460000000038001 \
+  --organization-id 789012345 \
+  --file ~/documents/payroll-receipt.pdf
+
 # CRM record attachment — no organization ID; --module is required
 python3 scripts/zoho_attach.py \
   --app crm \
@@ -327,6 +337,7 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 |---|---|---|---|
 | Books | expense receipt | implemented, verified live | — |
 | Books | bill attachment | implemented, unit tests only | [#1](https://github.com/sprintberlin/zoho-attachment-bridge/issues/1) |
+| Books | journal attachment | implemented, unit tests only | [#12](https://github.com/sprintberlin/zoho-attachment-bridge/issues/12) |
 | Books / CRM / WorkDrive | file size pre-check | implemented, configurable per target | [#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2) |
 | Books / Projects | organization and portal discovery | implemented, unit tests only | [#10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10) |
 | CRM | record attachment | implemented, mocked upload/list/download verification | [#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3) |
