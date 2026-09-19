@@ -59,10 +59,10 @@ Still in the API Console, open your Self Client and switch to the **Generate Cod
 Copy this value into the **Scope** field as one comma-separated line:
 
 ```text
-ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBooks.bills.READ
+ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBooks.bills.READ,ZohoBooks.accountants.CREATE,ZohoBooks.accountants.READ
 ```
 
-These four scopes are the minimum for the planned prototype:
+These six scopes are the minimum for Books receipts, bills, and journal attachments:
 
 | Scope | Why it is required |
 |---|---|
@@ -70,6 +70,8 @@ These four scopes are the minimum for the planned prototype:
 | `ZohoBooks.expenses.READ` | Download/read the receipt or expense again to verify that the upload really succeeded |
 | `ZohoBooks.bills.CREATE` | Upload an attachment to a bill |
 | `ZohoBooks.bills.READ` | Read the bill attachment again to verify the upload |
+| `ZohoBooks.accountants.CREATE` | Upload an attachment to a manual journal |
+| `ZohoBooks.accountants.READ` | Read the journal and download the attached document for SHA-256 verification |
 
 Optional discovery scopes:
 
@@ -86,6 +88,7 @@ The operation names above are taken from the official Zoho Books API documentati
 
 - [Expenses API](https://www.zoho.com/books/api/v3/expenses/): `Add receipt to an expense` and `Add attachment to an expense` require `ZohoBooks.expenses.CREATE`; `Get an expense receipt` requires `ZohoBooks.expenses.READ`.
 - [Bills API](https://www.zoho.com/books/api/v3/bills/): `Add attachment to a bill` requires `ZohoBooks.bills.CREATE`; `Get a bill attachment` requires `ZohoBooks.bills.READ`.
+- [Journals API](https://www.zoho.com/books/api/v3/journals/): `Add attachment to a journal` requires `ZohoBooks.accountants.CREATE`; `Get journal` requires `ZohoBooks.accountants.READ`. Journal files are listed on the journal as `documents[]` and downloaded from `GET /journals/{journal_id}/documents/{document_id}`.
 - [OAuth scopes](https://www.zoho.com/books/api/v3/oauth/): Books scopes follow `service.scope.operation`, with `CREATE`, `READ`, `UPDATE`, `DELETE`, or `ALL`.
 
 Do not add `ZohoBooks.fullaccess.ALL`. It is unnecessary for attachment uploads and grants substantially broader access.

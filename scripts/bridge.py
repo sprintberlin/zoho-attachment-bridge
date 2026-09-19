@@ -71,12 +71,14 @@ WORKDRIVE_MAX_UPLOAD_BYTES: int = 250 * 1024 * 1024
 
 # Documented per-target upload size limits. Override with
 # ZOHO_BRIDGE_MAX_BYTES_<TARGET> where TARGET uses underscores
-# (EXPENSE_RECEIPT, BILL_ATTACHMENT, RECORD_ATTACHMENT, FILE_UPLOAD,
-# NEW_VERSION).
+# (EXPENSE_RECEIPT, BILL_ATTACHMENT, JOURNAL_ATTACHMENT, RECORD_ATTACHMENT,
+# FILE_UPLOAD, NEW_VERSION).
 # Expense receipts: Zoho Books Welcome Guide, "Maximum file size allowed is 7MB"
 #   https://www.zoho.com/us/books/welcome-guide.html#record-expenses
 # Bill attachments: Zoho Books Help, "a maximum of 5 files, each of 5 MB"
 #   https://www.zoho.com/us/books/help/bills/other-actions.html#attach-files-to-bill
+# Journal attachments: Zoho Books Journals API does not publish a size limit.
+#   https://www.zoho.com/books/api/v3/journals/
 # CRM record attachments have no documented size on the record-attachment
 # endpoint. A limit is only applied when configured.
 DEFAULT_MAX_UPLOAD_BYTES: Dict[str, int] = {
@@ -89,6 +91,7 @@ DEFAULT_MAX_UPLOAD_BYTES: Dict[str, int] = {
 _TARGET_LIMIT_ENV: Dict[str, str] = {
     "expense-receipt": "ZOHO_BRIDGE_MAX_BYTES_EXPENSE_RECEIPT",
     "bill-attachment": "ZOHO_BRIDGE_MAX_BYTES_BILL_ATTACHMENT",
+    "journal-attachment": "ZOHO_BRIDGE_MAX_BYTES_JOURNAL_ATTACHMENT",
     "record-attachment": "ZOHO_BRIDGE_MAX_BYTES_RECORD_ATTACHMENT",
     "file-upload": "ZOHO_BRIDGE_MAX_BYTES_FILE_UPLOAD",
     "new-version": "ZOHO_BRIDGE_MAX_BYTES_NEW_VERSION",
@@ -745,6 +748,12 @@ def validate_file_extension(file_path: str, target: str) -> str:
         if not ext:
             raise ValueError("Zoho Projects attachments require a filename extension")
         return ext
+    # Zoho Books Journals API documentation publishes no extension allowlist.
+    # Require a filename extension and leave type enforcement to Zoho.
+    if target == "journal-attachment":
+        if not ext:
+            raise ValueError("Journal attachments require a filename extension")
+        return ext
     allowed = allowed_extensions(target)
     if ext not in allowed:
         raise ValueError(
@@ -1122,6 +1131,161 @@ def verify_books_bill_attachment(
         f"Expected {expected_sha256}, got {downloaded_sha256}"
     )
 
+
+
+def upload_books_journal_attachment(
+    dc: str,
+    access_token: str,
+    organization_id: str,
+    journal_id: str,
+    file_path: str,
+    max_bytes: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Upload a journal attachment using multipart/form-data.
+    POST /books/v3/journals/{journal_id}/attachment?organization_id={org_id}
+    Multipart field name: 'attachment'
+    OAuth scope: ZohoBooks.accountants.CREATE
+    https://www.zoho.com/books/api/v3/journals/
+    """
+    journal_id = validate_zoho_id(journal_id, "journal ID")
+    validate_file_extension(file_path, "journal-attachment")
+    validate_file_size(file_path, "journal-attachment", override_bytes=max_bytes)
+    body, content_type = build_multipart_body(file_path, field_name="attachment")
+    url = (
+        f"{books_base_url(dc)}/journals/{journal_id}/attachment"
+        f"?organization_id={organization_id}"
+    )
+    status, resp_bytes = api_request(
+        url, access_token, data=body, content_type=content_type, method="POST"
+    )
+    return parse_zoho_response(resp_bytes, status, "Journal attachment upload")
+
+
+def get_books_journal(
+    dc: str,
+    access_token: str,
+    organization_id: str,
+    journal_id: str,
+) -> Dict[str, Any]:
+    """
+    Retrieve journal details including attached documents.
+    GET /books/v3/journals/{journal_id}?organization_id={org_id}
+    OAuth scope: ZohoBooks.accountants.READ
+    """
+    journal_id = validate_zoho_id(journal_id, "journal ID")
+    url = (
+        f"{books_base_url(dc)}/journals/{journal_id}"
+        f"?organization_id={organization_id}"
+    )
+    status, body = api_request(url, access_token, method="GET")
+    return parse_zoho_response(body, status, "Get journal")
+
+
+def download_books_journal_document(
+    dc: str,
+    access_token: str,
+    organization_id: str,
+    journal_id: str,
+    document_id: str,
+) -> bytes:
+    """
+    Download a document attached to a journal.
+    GET /books/v3/journals/{journal_id}/documents/{document_id}?organization_id={org_id}
+
+    Journals have no GET /attachment endpoint (HTTP 405). Attached files are
+    listed on GET /journals/{journal_id} as documents[] and retrieved by
+    document_id, matching the Books document pattern used for invoices and
+    credit notes. The same path is documented for DELETE in API v4.
+    """
+    journal_id = validate_zoho_id(journal_id, "journal ID")
+    document_id = validate_zoho_id(document_id, "journal document ID")
+    url = (
+        f"{books_base_url(dc)}/journals/{journal_id}/documents/{document_id}"
+        f"?organization_id={organization_id}"
+    )
+    status, body = api_request(url, access_token, method="GET")
+    if status >= 400:
+        err_text = body.decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"Failed to download journal document: HTTP {status} — {err_text}"
+        )
+    return body
+
+
+def verify_books_journal_attachment(
+    dc: str,
+    access_token: str,
+    organization_id: str,
+    journal_id: str,
+    file_name: str,
+    expected_sha256: str,
+    document_id: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """
+    Read back and verify an uploaded journal attachment.
+    1. GET /journals/{journal_id} and inspect journal.documents
+    2. Identify the document (matching document_id or a unique file_name)
+    3. Download GET /journals/{journal_id}/documents/{document_id}
+    4. Compare SHA-256 against the local file.
+    Returns (success_bool, message).
+    """
+    try:
+        journal_resp = get_books_journal(dc, access_token, organization_id, journal_id)
+    except Exception as exc:
+        return False, f"Verification failed: unable to retrieve journal ({exc})"
+
+    journal = journal_resp.get("journal", {}) if isinstance(journal_resp, dict) else {}
+    docs = journal.get("documents") or []
+    if not isinstance(docs, list):
+        docs = []
+
+    target_id: Optional[str] = None
+    if document_id:
+        for doc in docs:
+            if not isinstance(doc, dict):
+                continue
+            if str(doc.get("document_id")) == str(document_id):
+                target_id = str(document_id)
+                break
+        if not target_id:
+            return False, (
+                f"Verification failed: newly uploaded document '{document_id}' "
+                f"was not found on journal {journal_id}"
+            )
+    else:
+        filename_matches = [
+            doc for doc in docs
+            if isinstance(doc, dict) and doc.get("file_name") == file_name
+        ]
+        if len(filename_matches) == 1 and filename_matches[0].get("document_id"):
+            target_id = str(filename_matches[0]["document_id"])
+        elif len(filename_matches) > 1:
+            return False, (
+                f"Verification failed: multiple journal documents named '{file_name}' "
+                "exist; upload response did not identify the newly uploaded document"
+            )
+
+    if not target_id:
+        return False, (
+            f"Verification failed: Attachment '{file_name}' not found "
+            f"on journal {journal_id}"
+        )
+
+    try:
+        downloaded = download_books_journal_document(
+            dc, access_token, organization_id, journal_id, target_id
+        )
+    except Exception as exc:
+        return False, f"Verification failed: unable to read back journal document ({exc})"
+
+    downloaded_sha256 = sha256_bytes(downloaded)
+    if downloaded_sha256 == expected_sha256:
+        return True, f"Verified: SHA-256 match ({downloaded_sha256})"
+    return False, (
+        f"Verification failed: SHA-256 mismatch. "
+        f"Expected {expected_sha256}, got {downloaded_sha256}"
+    )
 
 # ---------------------------------------------------------------------------
 # CRM API v8 Upload & Read-Back

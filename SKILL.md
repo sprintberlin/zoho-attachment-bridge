@@ -63,6 +63,7 @@ Zoho enforces different allowlists per endpoint:
 |---|---|
 | `expense-receipt` | gif, png, jpeg, jpg, bmp, pdf, xls, xlsx, doc, docx |
 | `bill-attachment` | gif, png, jpeg, jpg, bmp, pdf |
+| `journal-attachment` | Zoho Books publishes no extension allowlist for journal attachments; the bridge requires a filename extension and leaves enforcement to the API |
 | `record-attachment` (CRM) | Zoho publishes no extension allowlist for this endpoint; the bridge requires a filename extension and leaves enforcement to the API |
 | `file-upload` (WorkDrive) | Zoho enforces blocked/allowed extensions per organization policy; the bridge requires a filename extension and leaves enforcement to the API |
 | `new-version` (WorkDrive) | Same policy as `file-upload`; creates a new top version over an existing file with the same name |
@@ -71,12 +72,12 @@ Zoho enforces different allowlists per endpoint:
 
 ## File size limits
 
-Reject before multipart: Books receipts 7 MB, bills 5 MB, WorkDrive 250 MB. CRM and Projects have no documented default. Override with `--max-bytes`; target and profile env variables are listed in the README.
+Reject before multipart: Books receipts 7 MB, bills 5 MB, WorkDrive 250 MB. CRM, Projects, and Books manual journals have no documented default. Override with `--max-bytes`; target and profile env variables are listed in the README.
 
 ## Scopes & Onboarding
 
 Run `python3 scripts/onboarding.py`. Minimale Scopes:
-- Books: `ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBooks.bills.READ`
+- Books: `ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBooks.bills.READ,ZohoBooks.accountants.CREATE,ZohoBooks.accountants.READ`
 - CRM: `ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachments.READ`
 - WorkDrive: `WorkDrive.files.CREATE,WorkDrive.files.READ`
 - Projects: `ZohoProjects.tasks.READ,ZohoProjects.tasks.CREATE,ZohoPC.files.ALL`
@@ -101,6 +102,9 @@ python3 scripts/zoho_attach.py --app books --target expense-receipt --id <expens
 
 # Bill attachment upload with verification
 python3 scripts/zoho_attach.py --app books --target bill-attachment --id <bill_id> --file <path>
+
+# Journal attachment upload with verification (manual journals)
+python3 scripts/zoho_attach.py --app books --target journal-attachment --id <journal_id> --file <path>
 
 # CRM v8 record attachment upload with verification
 # --module is required; CRM does not use --organization-id.
@@ -145,6 +149,7 @@ Exit code `0` only after the uploaded file was confirmed present in WorkDrive vi
 |---|---|---|
 | Books | expense receipt | implemented, verified live |
 | Books | bill attachment | implemented, unit tests only |
+| Books | journal attachment | implemented, unit tests only ([#12](https://github.com/sprintberlin/zoho-attachment-bridge/issues/12)) |
 | CRM | record attachment | implemented, mocked upload/list/download verification |
 | WorkDrive | file upload, new version | implemented, mocked upload/download SHA-256 verification ([#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9)) |
 | Projects | task and comment attachment | implemented, mocked upload/download SHA-256 verification |

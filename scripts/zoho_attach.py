@@ -39,6 +39,8 @@ from bridge import (
     sha256_file,
     upload_books_bill_attachment,
     upload_books_expense_receipt,
+    upload_books_journal_attachment,
+    verify_books_journal_attachment,
     extract_projects_attachment_metadata,
     extract_projects_comment_id,
     upload_crm_record_attachment,
@@ -72,6 +74,7 @@ def parse_args(args=None) -> argparse.Namespace:
         choices=[
             "expense-receipt",
             "bill-attachment",
+            "journal-attachment",
             "record-attachment",
             "file-upload",
             "new-version",
@@ -84,7 +87,7 @@ def parse_args(args=None) -> argparse.Namespace:
         "--id",
         required=True,
         help=(
-            "ID of the target record (expense ID, bill ID, CRM record ID, "
+            "ID of the target record (expense ID, bill ID, journal ID, CRM record ID, "
             "WorkDrive destination folder ID, or Projects task ID)"
         ),
     )
@@ -196,10 +199,10 @@ def main(cli_args=None) -> int:
 
     org_id = args.organization_id or config.get("books_org_id")
     if args.app == "books":
-        if args.target not in ("expense-receipt", "bill-attachment"):
+        if args.target not in ("expense-receipt", "bill-attachment", "journal-attachment"):
             print(
                 f"Error: Invalid target '{args.target}' for Books. "
-                "Supported targets: expense-receipt, bill-attachment.",
+                "Supported targets: expense-receipt, bill-attachment, journal-attachment.",
                 file=sys.stderr,
             )
             return 1
@@ -300,6 +303,15 @@ def main(cli_args=None) -> int:
                 file_path=str(file_path),
                 max_bytes=effective_max_bytes,
             )
+        elif args.app == "books" and args.target == "journal-attachment":
+            res = upload_books_journal_attachment(
+                dc=dc,
+                access_token=access_token,
+                organization_id=org_id,
+                journal_id=args.id,
+                file_path=str(file_path),
+                max_bytes=effective_max_bytes,
+            )
         elif args.app == "crm" and args.target == "record-attachment":
             res = upload_crm_record_attachment(
                 dc=dc,
@@ -376,6 +388,15 @@ def main(cli_args=None) -> int:
             access_token=access_token,
             organization_id=org_id,
             bill_id=args.id,
+            expected_sha256=local_sha,
+        )
+    elif args.app == "books" and args.target == "journal-attachment":
+        verified, vmsg = verify_books_journal_attachment(
+            dc=dc,
+            access_token=access_token,
+            organization_id=org_id,
+            journal_id=args.id,
+            file_name=file_path.name,
             expected_sha256=local_sha,
         )
     elif args.app == "crm" and args.target == "record-attachment":

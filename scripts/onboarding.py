@@ -131,7 +131,7 @@ def main(cli_args=None) -> int:
     # 3. Grant Code
     print("\nIn Zoho API Console -> Self Client -> Generate Code:")
     print("Required scopes for Books:")
-    print("  ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBooks.bills.READ")
+    print("  ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBooks.bills.READ,ZohoBooks.accountants.CREATE,ZohoBooks.accountants.READ")
     print("Required scopes for CRM record attachments:")
     print("  ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachments.READ")
     print("Required scopes for WorkDrive uploads and new versions:")

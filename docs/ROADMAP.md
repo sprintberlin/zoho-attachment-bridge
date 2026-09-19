@@ -2,7 +2,7 @@
 
 Tracked in GitHub issues. This file is the index, not a second tracker.
 
-Current release: **0.4.0 (unreleased)**. Books expense receipts are implemented and verified live. Bill attachments are implemented but only unit-tested. CRM v8 record attachments and WorkDrive file/version uploads are implemented with mocked upload/download SHA-256 verification.
+Current release: **0.4.0 (unreleased)**. Books expense receipts are implemented and verified live. Bill and journal attachments are implemented but only unit-tested. CRM v8 record attachments and WorkDrive file/version uploads are implemented with mocked upload/download SHA-256 verification.
 
 ## 0.1.0 — scaffolding
 
@@ -12,6 +12,7 @@ Completed. Repository, configuration contract, MCP failure documentation, Self C
 
 - [x] Expense receipt upload (`POST /expenses/{id}/receipt`) — verified live
 - [x] Bill attachment upload (`POST /bills/{id}/attachment`) — unit tests only
+- [x] Journal attachment upload (`POST /journals/{id}/attachment`) — unit tests only ([#12](https://github.com/sprintberlin/zoho-attachment-bridge/issues/12))
 - [x] SHA-256 read-back verification
 - [x] Persistent access token cache (mode 0600)
 - [x] HTTP 429 backoff
