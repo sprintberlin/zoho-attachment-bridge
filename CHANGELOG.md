@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] — 2026-09-18
 
 ### Added
+- Issue-first contribution loop for humans and agents, resolving [issue #14](https://github.com/sprintberlin/zoho-attachment-bridge/issues/14): daily-use defects and improvement ideas are searched or filed immediately; feasible changes proceed through branch, tests, PR, CI, and merge; native `git` and `gh` are used without a reporting wrapper.
 - Books journal attachment adapter with `--app books --target journal-attachment`, resolving [issue #12](https://github.com/sprintberlin/zoho-attachment-bridge/issues/12).
   Multipart upload uses `POST /books/v3/journals/{journal_id}/attachment` with
   form field `attachment`. Mandatory SHA-256 read-back lists the journal's

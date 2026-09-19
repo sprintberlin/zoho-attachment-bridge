@@ -41,11 +41,9 @@ Companion MCP skill: [openclaw-zoho-workdrive-mcp-skill](https://github.com/spri
 
 ## Working on this repo
 
-1. Read `README.md` and `SKILL.md`.
-2. Pick an open issue. Verify official Zoho API docs (endpoint, scopes, file types) **before** writing upload code. Do not copy the Books allowlists.
-3. Keep the contract: real `multipart/form-data`, exit 0 only after SHA-256 read-back, no secrets in logs or the public repo.
-4. Add or update unit tests. Do not make live Zoho calls from CI.
-5. Update `CHANGELOG.md` and this file when the issue lands.
+- [x] Issue-first daily-use contribution loop for humans and agents — [#14](https://github.com/sprintberlin/zoho-attachment-bridge/issues/14)
+
+Follow [CONTRIBUTING.md](../CONTRIBUTING.md): search or file an issue first; when feasible, implement it through branch, tests, PR, CI, and merge.
 
 ## Out of scope for now
 
