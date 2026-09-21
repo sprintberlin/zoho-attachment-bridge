@@ -84,6 +84,16 @@ without creating the output file. Re-check the resource ID and the requested
 version. MCP cannot deliver file bytes; downloads go through the dedicated
 download host with `WorkDrive.files.READ`.
 
+### WorkDrive download returns HTTP 404 right after an upload
+
+The dedicated download host needs a moment to propagate a freshly uploaded
+resource. Observed live: HTTP 404 with an empty body at `t+0s`, then HTTP 200
+with byte-exact content at `t+3s`. The bridge therefore retries a 404 download
+a bounded number of times (`WORKDRIVE_DOWNLOAD_404_RETRIES`, default 4, 3s
+apart) before failing. Authorization errors and other statuses are never
+retried. A 404 that survives the full retry window is a genuinely missing
+resource or version; re-check the resource ID.
+
 ### WorkDrive upload response contains no resource ID
 
 The bridge refuses to report success because it cannot perform SHA-256 read-back
