@@ -1102,6 +1102,45 @@ class TestWorkDriveOperationsAndVerification(unittest.TestCase):
         self.assertIn("WorkDrive.files.CREATE,WorkDrive.files.READ", message)
         self.assertNotIn("tok", message)
 
+    @patch("bridge.time.sleep")
+    @patch("bridge.api_request")
+    def test_download_workdrive_file_retries_transient_404(self, mock_api, mock_sleep):
+        mock_api.side_effect = [
+            (404, b""),
+            (404, b""),
+            (200, b"propagated bytes"),
+        ]
+
+        data = bridge.download_workdrive_file("eu", "tok", "resource123")
+
+        self.assertEqual(data, b"propagated bytes")
+        self.assertEqual(mock_api.call_count, 3)
+        self.assertEqual(mock_sleep.call_count, 2)
+        mock_sleep.assert_called_with(bridge.WORKDRIVE_DOWNLOAD_404_DELAY_SECONDS)
+
+    @patch("bridge.time.sleep")
+    @patch("bridge.api_request")
+    def test_download_workdrive_file_fails_after_404_retry_budget(self, mock_api, mock_sleep):
+        mock_api.return_value = (404, b"")
+
+        with self.assertRaises(RuntimeError) as ctx:
+            bridge.download_workdrive_file("eu", "tok", "resource123")
+
+        self.assertIn("HTTP 404", str(ctx.exception))
+        expected_calls = bridge.WORKDRIVE_DOWNLOAD_404_RETRIES + 1
+        self.assertEqual(mock_api.call_count, expected_calls)
+
+    @patch("bridge.time.sleep")
+    @patch("bridge.api_request")
+    def test_download_workdrive_file_does_not_retry_other_errors(self, mock_api, mock_sleep):
+        mock_api.return_value = (500, b"boom")
+
+        with self.assertRaises(RuntimeError):
+            bridge.download_workdrive_file("eu", "tok", "resource123")
+
+        self.assertEqual(mock_api.call_count, 1)
+        mock_sleep.assert_not_called()
+
     @patch("bridge.download_workdrive_file")
     def test_verify_workdrive_file_match_and_mismatch(self, mock_download):
         raw_bytes = b"exact WorkDrive bytes"

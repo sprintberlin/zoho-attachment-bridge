@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] — 2026-09-18
 
 ### Fixed
+- Bounded retry for HTTP 404 responses from the WorkDrive dedicated download
+  host directly after a successful upload. The download host propagates fresh
+  resources with a short delay (observed live: 404 at `t+0s`, HTTP 200 at
+  `t+3s`), which made the mandatory SHA-256 read-back fail
+  nondeterministically. Authorization and other errors are never retried.
+  Resolves [issue #20](https://github.com/sprintberlin/zoho-attachment-bridge/issues/20).
 - Corrected the WorkDrive Self Client scope set for downloads and mandatory
   SHA-256 read-back. The dedicated download host requires
   `ZohoFiles.files.READ` in addition to `WorkDrive.files.CREATE` and

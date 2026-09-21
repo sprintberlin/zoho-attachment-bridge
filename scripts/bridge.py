@@ -69,6 +69,13 @@ WORKDRIVE_DOWNLOAD_DC_MAP: Dict[str, str] = {
 # https://www.zoho.com/workdrive/developer/docs/api/v1/upload-file.html
 WORKDRIVE_MAX_UPLOAD_BYTES: int = 250 * 1024 * 1024
 
+# The dedicated WorkDrive download host can return HTTP 404 with an empty body
+# for a freshly uploaded resource until propagation completes. Observed live:
+# 404 at t+0s, HTTP 200 with byte-exact content at t+3s. Retry bounded before
+# surfacing the error; authorization and other failures are never retried.
+WORKDRIVE_DOWNLOAD_404_RETRIES: int = 4
+WORKDRIVE_DOWNLOAD_404_DELAY_SECONDS: float = 3.0
+
 # Documented per-target upload size limits. Override with
 # ZOHO_BRIDGE_MAX_BYTES_<TARGET> where TARGET uses underscores
 # (EXPENSE_RECEIPT, BILL_ATTACHMENT, JOURNAL_ATTACHMENT, RECORD_ATTACHMENT,
@@ -1527,7 +1534,14 @@ def download_workdrive_file(
     if version:
         url = f"{url}?{urllib.parse.urlencode({'version': version})}"
 
-    status, body = api_request(url, access_token, method="GET")
+    attempt = 0
+    while True:
+        status, body = api_request(url, access_token, method="GET")
+        if status == 404 and attempt < WORKDRIVE_DOWNLOAD_404_RETRIES:
+            attempt += 1
+            time.sleep(WORKDRIVE_DOWNLOAD_404_DELAY_SECONDS)
+            continue
+        break
     if status >= 400:
         err_text = body.decode("utf-8", errors="replace")
         if status == 401 and "INVALID_OAUTHSCOPE" in err_text:
