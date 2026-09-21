@@ -76,7 +76,7 @@ Run `python3 scripts/onboarding.py`.
 
 - Books: `ZohoBooks.expenses.CREATE,ZohoBooks.expenses.READ,ZohoBooks.bills.CREATE,ZohoBooks.bills.READ,ZohoBooks.accountants.CREATE,ZohoBooks.accountants.READ`
 - CRM: `ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachments.READ`
-- WorkDrive: `WorkDrive.files.CREATE,WorkDrive.files.READ`
+- WorkDrive: `WorkDrive.files.CREATE,WorkDrive.files.READ,ZohoFiles.files.READ`
 - Projects: `ZohoProjects.tasks.READ,ZohoProjects.tasks.CREATE,ZohoPC.files.ALL`
 - Optional discovery: `ZohoBooks.settings.READ,ZohoProjects.portals.READ`
 

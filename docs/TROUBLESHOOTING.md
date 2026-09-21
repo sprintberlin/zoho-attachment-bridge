@@ -142,15 +142,19 @@ just-uploaded document for SHA-256 verification. A Books token that only has
 expense and bill scopes returns HTTP 401 `You are not authorized to perform this
 operation` on journal upload and document download.
 
-For WorkDrive, both scopes are mandatory:
+For WorkDrive, all three scopes are mandatory:
 
 ```text
-WorkDrive.files.CREATE,WorkDrive.files.READ
+WorkDrive.files.CREATE,WorkDrive.files.READ,ZohoFiles.files.READ
 ```
 
-`CREATE` uploads the bytes; `READ` downloads them again for SHA-256 verification.
-A Books- or CRM-only refresh token returns `F7007 Invalid OAuth scope`. Generate
-a new grant with the complete scope list rather than reusing an incompatible token.
+| Scope | Purpose |
+|---|---|
+| `WorkDrive.files.CREATE` | Uploads file bytes. |
+| `WorkDrive.files.READ` | Metadata authorization on the WorkDrive API host. |
+| `ZohoFiles.files.READ` | `GET https://download.zoho.<dc>/v1/workdrive/download/{resource_id}` serves the actual file bytes for SHA-256 verification and for `scripts/zoho_download.py`. The dedicated download host validates this scope separately; a token without it uploads fine but every download returns HTTP 401 `INVALID_OAUTHSCOPE`. |
+
+All three are required: `WorkDrive.files.CREATE` uploads the bytes, `WorkDrive.files.READ` authorizes metadata reads, and `ZohoFiles.files.READ` authorizes byte downloads from the download server. A Books- or CRM-only refresh token returns `F7007 Invalid OAuth scope`. A token missing `ZohoFiles.files.READ` can upload, but every SHA-256 verification and `zoho_download.py` invocation fails with HTTP 401 `INVALID_OAUTHSCOPE`. Scopes are fixed when the refresh token is created; generate a new grant with the complete scope string and exchange it for a new refresh token.
 
 ### `This user belongs to multiple organizations`
 

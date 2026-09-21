@@ -7,11 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.0] — 2026-09-18
 
+### Fixed
+- Corrected the WorkDrive Self Client scope set for downloads and mandatory
+  SHA-256 read-back. The dedicated download host requires
+  `ZohoFiles.files.READ` in addition to `WorkDrive.files.CREATE` and
+  `WorkDrive.files.READ`; without it, uploads succeed but downloads return
+  HTTP 401 `INVALID_OAUTHSCOPE`. The CLI now reports the actionable complete
+  scope string. Resolves [issue #18](https://github.com/sprintberlin/zoho-attachment-bridge/issues/18).
+
 ### Added
 - WorkDrive download CLI `scripts/zoho_download.py`, resolving [issue #16](https://github.com/sprintberlin/zoho-attachment-bridge/issues/16).
   Downloads file bytes from the dedicated WorkDrive download host
   (`download.zoho.<dc>`) with Self Client OAuth, writes them to a local path,
-  and prints size and SHA-256 digest. Requires `WorkDrive.files.READ`.
+  and prints size and SHA-256 digest. Requires `WorkDrive.files.READ` and
+  `ZohoFiles.files.READ`.
   Refuses to overwrite existing files without `--overwrite`, rejects output
   paths without an existing parent directory, and treats an empty response body
   as a failure. Covers the gap MCP cannot close: it transfers metadata only,
