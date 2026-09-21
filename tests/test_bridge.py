@@ -32,6 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import bridge
 import onboarding
 import zoho_attach
+import zoho_download
 
 
 class TestDCResolution(unittest.TestCase):
@@ -1867,3 +1868,212 @@ class TestCliProjectsAttach(unittest.TestCase):
             mock_verify.assert_called_once()
         finally:
             os.unlink(tmp_path)
+
+
+class TestCliZohoDownload(unittest.TestCase):
+    """CLI coverage for scripts/zoho_download.py (WorkDrive download, issue #16)."""
+
+    def _env(self):
+        return {
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "reftok",
+            "dc": "eu",
+            "books_org_id": "",
+            "projects_portal_id": "",
+        }
+
+    def test_invalid_resource_id_fails_before_authentication(self):
+        with patch("zoho_download.refresh_access_token") as mock_token:
+            ret = zoho_download.main([
+                "--app", "workdrive",
+                "--id", "abc?query=1",
+                "--out", "/tmp/bridge-download-reject.pdf",
+            ])
+        self.assertEqual(ret, 1)
+        mock_token.assert_not_called()
+
+    def test_output_directory_rejected(self):
+        ret = zoho_download.main([
+            "--app", "workdrive",
+            "--id", "resource123",
+            "--out", "/tmp",
+        ])
+        self.assertEqual(ret, 1)
+
+    def test_missing_parent_directory_rejected(self):
+        ret = zoho_download.main([
+            "--app", "workdrive",
+            "--id", "resource123",
+            "--out", "/tmp/bridge-no-such-dir-x9z/file.pdf",
+        ])
+        self.assertEqual(ret, 1)
+
+    def test_existing_file_requires_overwrite(self):
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(b"old")
+            tmp_path = tmp.name
+        try:
+            ret = zoho_download.main([
+                "--app", "workdrive",
+                "--id", "resource123",
+                "--out", tmp_path,
+            ])
+            self.assertEqual(ret, 1)
+            with open(tmp_path, "rb") as fh:
+                self.assertEqual(fh.read(), b"old")
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("zoho_download.download_workdrive_file", return_value=b"downloaded bytes")
+    @patch("zoho_download.refresh_access_token", return_value="tok")
+    @patch("zoho_download.load_env")
+    def test_successful_download_writes_bytes(self, mock_env, mock_tok, mock_dl):
+        mock_env.return_value = self._env()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "fetched.pdf"
+            ret = zoho_download.main([
+                "--app", "workdrive",
+                "--id", "resource123",
+                "--out", str(out),
+            ])
+            self.assertEqual(ret, 0)
+            self.assertEqual(out.read_bytes(), b"downloaded bytes")
+            mock_dl.assert_called_once_with(
+                dc="eu", access_token="tok", resource_id="resource123", version=None
+            )
+
+    @patch("zoho_download.download_workdrive_file", return_value=b"v2 bytes")
+    @patch("zoho_download.refresh_access_token", return_value="tok")
+    @patch("zoho_download.load_env")
+    def test_version_is_passed_through(self, mock_env, mock_tok, mock_dl):
+        mock_env.return_value = self._env()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "fetched-v2.pdf"
+            ret = zoho_download.main([
+                "--app", "workdrive",
+                "--id", "resource123",
+                "--out", str(out),
+                "--version", "2",
+            ])
+            self.assertEqual(ret, 0)
+            self.assertEqual(out.read_bytes(), b"v2 bytes")
+            self.assertEqual(mock_dl.call_args.kwargs.get("version"), "2")
+
+    @patch("zoho_download.download_workdrive_file", return_value=b"")
+    @patch("zoho_download.refresh_access_token", return_value="tok")
+    @patch("zoho_download.load_env")
+    def test_empty_body_is_failure_and_writes_no_file(self, mock_env, mock_tok, mock_dl):
+        mock_env.return_value = self._env()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "empty.pdf"
+            ret = zoho_download.main([
+                "--app", "workdrive",
+                "--id", "resource123",
+                "--out", str(out),
+            ])
+            self.assertEqual(ret, 1)
+            self.assertFalse(out.exists())
+
+    @patch("zoho_download.download_workdrive_file", return_value=b"new bytes")
+    @patch("zoho_download.refresh_access_token", return_value="tok")
+    @patch("zoho_download.load_env")
+    def test_overwrite_flag_replaces_existing_file(self, mock_env, mock_tok, mock_dl):
+        mock_env.return_value = self._env()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "replace.pdf"
+            out.write_bytes(b"old bytes")
+            ret = zoho_download.main([
+                "--app", "workdrive",
+                "--id", "resource123",
+                "--out", str(out),
+                "--overwrite",
+            ])
+            self.assertEqual(ret, 0)
+            self.assertEqual(out.read_bytes(), b"new bytes")
+
+    @patch("zoho_download.download_workdrive_file", side_effect=RuntimeError("HTTP 404"))
+    @patch("zoho_download.refresh_access_token", return_value="tok")
+    @patch("zoho_download.load_env")
+    def test_download_error_returns_nonzero(self, mock_env, mock_tok, mock_dl):
+        mock_env.return_value = self._env()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "failed.pdf"
+            ret = zoho_download.main([
+                "--app", "workdrive",
+                "--id", "resource123",
+                "--out", str(out),
+            ])
+            self.assertEqual(ret, 1)
+            self.assertFalse(out.exists())
+
+    @patch("zoho_download.refresh_access_token")
+    def test_parent_traversal_rejected_before_auth(self, mock_token):
+        ret = zoho_download.main([
+            "--app", "workdrive",
+            "--id", "resource123",
+            "--out", "/tmp/bridge-dl/../etc/passwd",
+        ])
+        self.assertEqual(ret, 1)
+        mock_token.assert_not_called()
+
+    @patch("zoho_download.refresh_access_token")
+    def test_symlink_output_rejected_before_auth(self, mock_token):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "real.pdf"
+            target.write_bytes(b"real")
+            link = Path(tmpdir) / "link.pdf"
+            os.symlink(target, link)
+            ret = zoho_download.main([
+                "--app", "workdrive",
+                "--id", "resource123",
+                "--out", str(link),
+            ])
+            self.assertEqual(ret, 1)
+            mock_token.assert_not_called()
+            self.assertEqual(target.read_bytes(), b"real")
+
+    @patch("zoho_download.download_workdrive_file", return_value=b"payload")
+    @patch("zoho_download.refresh_access_token", return_value="tok")
+    @patch("zoho_download.load_env")
+    def test_success_leaves_no_temp_file(self, mock_env, mock_tok, mock_dl):
+        mock_env.return_value = self._env()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "clean.pdf"
+            ret = zoho_download.main([
+                "--app", "workdrive",
+                "--id", "resource123",
+                "--out", str(out),
+            ])
+            self.assertEqual(ret, 0)
+            leftovers = [p.name for p in Path(tmpdir).iterdir() if p != out]
+            self.assertEqual(leftovers, [])
+
+    def test_write_download_atomic_refuses_existing_target(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "exists.pdf"
+            target.write_bytes(b"old")
+            with self.assertRaises(FileExistsError):
+                zoho_download.write_download_atomic(target, b"new", overwrite=False)
+            self.assertEqual(target.read_bytes(), b"old")
+            leftovers = [p.name for p in Path(tmpdir).iterdir() if p != target]
+            self.assertEqual(leftovers, [])
+
+    @patch("zoho_download.download_workdrive_file", return_value=b"replacement")
+    @patch("zoho_download.refresh_access_token", return_value="tok")
+    @patch("zoho_download.load_env")
+    def test_overwrite_replaces_inode_and_cleans_temp(self, mock_env, mock_tok, mock_dl):
+        mock_env.return_value = self._env()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "replace-v2.pdf"
+            out.write_bytes(b"original")
+            ret = zoho_download.main([
+                "--app", "workdrive",
+                "--id", "resource123",
+                "--out", str(out),
+                "--overwrite",
+            ])
+            self.assertEqual(ret, 0)
+            self.assertEqual(out.read_bytes(), b"replacement")
+            leftovers = [p.name for p in Path(tmpdir).iterdir() if p != out]
+            self.assertEqual(leftovers, [])

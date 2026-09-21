@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] — 2026-09-18
 
 ### Added
+- WorkDrive download CLI `scripts/zoho_download.py`, resolving [issue #16](https://github.com/sprintberlin/zoho-attachment-bridge/issues/16).
+  Downloads file bytes from the dedicated WorkDrive download host
+  (`download.zoho.<dc>`) with Self Client OAuth, writes them to a local path,
+  and prints size and SHA-256 digest. Requires `WorkDrive.files.READ`.
+  Refuses to overwrite existing files without `--overwrite`, rejects output
+  paths without an existing parent directory, and treats an empty response body
+  as a failure. Covers the gap MCP cannot close: it transfers metadata only,
+  never file bytes into the agent workspace.
 - Issue-first contribution loop for humans and agents, resolving [issue #14](https://github.com/sprintberlin/zoho-attachment-bridge/issues/14): daily-use defects and improvement ideas are searched or filed immediately; feasible changes proceed through branch, tests, PR, CI, and merge; native `git` and `gh` are used without a reporting wrapper.
 - Books journal attachment adapter with `--app books --target journal-attachment`, resolving [issue #12](https://github.com/sprintberlin/zoho-attachment-bridge/issues/12).
   Multipart upload uses `POST /books/v3/journals/{journal_id}/attachment` with
@@ -23,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with form field `uploaddoc` and mandatory SHA-256 verification against the task attachment list and download URL.
 - Multipart comment upload using `POST https://projectsapi.<dc>/restapi/portal/{portal_id}/projects/{project_id}/tasks/{task_id}/comments/`
   with form fields `uploaddoc` and `content`.
-- Mock-only unit test coverage (104 tests total across the suite) covering Projects URL composition, numeric ID validation,
+- Mock-only unit test coverage (118 tests total across the suite) covering Projects URL composition, numeric ID validation,
   extension validation, multipart requests, and SHA-256 verification.
 
 - Books organization and Projects portal discovery via `scripts/discover.py`, resolving [issue #10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10). The helpers call `GET /books/v3/organizations` and `GET /api/v3/portals`, print IDs plus non-secret metadata, and support named profiles and JSON output.

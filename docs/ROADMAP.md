@@ -31,6 +31,7 @@ Companion MCP skill: [openclaw-zoho-workdrive-mcp-skill](https://github.com/spri
 
 - [ ] Inventory item images and bill attachments — [#8](https://github.com/sprintberlin/zoho-attachment-bridge/issues/8)
 - [x] WorkDrive file upload and new version (`POST /workdrive/api/v1/upload` with multipart `content`; `override-name-exist=true` for a new version), plus dedicated-download-host SHA-256 read-back — mocked verification ([#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9))
+- [x] WorkDrive download CLI (`scripts/zoho_download.py`) writing bytes from the dedicated download host to a local path with SHA-256 reporting — mocked verification ([#16](https://github.com/sprintberlin/zoho-attachment-bridge/issues/16))
 
 ## 1.0.0 — release
 
@@ -48,7 +49,7 @@ Follow [CONTRIBUTING.md](../CONTRIBUTING.md): search or file an issue first; whe
 ## Out of scope for now
 
 - HTTP service mode. The scripts stay callable from the command line.
-- Download and inline image extraction. Reading is what MCP already does well.
+- Inline image extraction and OCR. Plain downloads are covered since [#16](https://github.com/sprintberlin/zoho-attachment-bridge/issues/16); MCP returns metadata only and cannot deliver file bytes into the agent workspace.
 
 ## Watch list
 

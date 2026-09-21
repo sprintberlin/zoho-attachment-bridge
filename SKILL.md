@@ -104,6 +104,9 @@ python3 scripts/zoho_attach.py --app crm --target record-attachment --module <mo
 python3 scripts/zoho_attach.py --app workdrive --target file-upload --id <folder_id> --file <path> [--filename <name>]
 python3 scripts/zoho_attach.py --app workdrive --target new-version --id <folder_id> --file <path> --filename <existing_name>
 
+# WorkDrive: download file bytes to the local workspace (resolve resource ID through MCP first)
+python3 scripts/zoho_download.py --app workdrive --id <resource_id> --out <path> [--version <n>] [--overwrite]
+
 # Projects
 python3 scripts/zoho_attach.py --app projects --target task-attachment --project-id <project_id> --id <task_id> --file <path> [--portal-id <portal_id>]
 python3 scripts/zoho_attach.py --app projects --target comment-attachment --project-id <project_id> --id <task_id> --file <path> [--comment <text>] [--portal-id <portal_id>]
@@ -118,6 +121,7 @@ python3 scripts/zoho_attach.py --app projects --target comment-attachment --proj
 | Books | journal attachment | unit tested ([#12](https://github.com/sprintberlin/zoho-attachment-bridge/issues/12)) |
 | CRM | record attachment | mocked upload/list/download verification |
 | WorkDrive | file upload, new version | mocked upload/download verification ([#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9)) |
+| WorkDrive | download to local workspace | mocked download verification ([#16](https://github.com/sprintberlin/zoho-attachment-bridge/issues/16)) |
 | Projects | task and comment attachment | mocked upload/list/download verification |
 | Inventory | item image, bill attachment | planned ([#8](https://github.com/sprintberlin/zoho-attachment-bridge/issues/8)) |
 

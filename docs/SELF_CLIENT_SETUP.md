@@ -166,7 +166,7 @@ WorkDrive.files.CREATE,WorkDrive.files.READ
 | Scope | Why it is required |
 |---|---|
 | `WorkDrive.files.CREATE` | `POST /workdrive/api/v1/upload` uploads the multipart form field named `content`. The same endpoint stores a new top version when `override-name-exist=true`. |
-| `WorkDrive.files.READ` | `GET https://download.zoho.<dc>/v1/workdrive/download/{resource_id}` downloads the uploaded bytes for SHA-256 verification. |
+| `WorkDrive.files.READ` | `GET https://download.zoho.<dc>/v1/workdrive/download/{resource_id}` downloads bytes for SHA-256 verification and for `scripts/zoho_download.py`. |
 
 Both are required. A Books- or CRM-only refresh token returns `F7007 Invalid OAuth scope` on every WorkDrive call. Generate a new grant with the complete scope string and exchange it for a new refresh token. WorkDrive does **not** use a Books `organization_id`; `--id` is the destination folder ID, resolved through the companion WorkDrive MCP skill.
 
