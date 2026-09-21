@@ -283,6 +283,12 @@ python3 scripts/zoho_attach.py \
   --filename report.pdf \
   --file ~/documents/report-v2.pdf
 
+# WorkDrive download — --id is the file resource ID, resolved through MCP first
+python3 scripts/zoho_download.py \
+  --app workdrive \
+  --id <resource_id> \
+  --out ~/documents/report.pdf
+
 # Projects task attachment
 python3 scripts/zoho_attach.py \
   --app projects \
@@ -342,6 +348,7 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 | Books / Projects | organization and portal discovery | implemented, unit tests only | [#10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10) |
 | CRM | record attachment | implemented, mocked upload/list/download verification | [#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3) |
 | WorkDrive | file upload, new version | implemented, mocked upload/download verification | [#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9) |
+| WorkDrive | download to local workspace | implemented, mocked download verification | [#16](https://github.com/sprintberlin/zoho-attachment-bridge/issues/16) |
 | Projects | task and comment attachment | implemented, mocked upload/download verification | [#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4) |
 | Inventory | item image, bill attachment | planned | [#8](https://github.com/sprintberlin/zoho-attachment-bridge/issues/8) |
 

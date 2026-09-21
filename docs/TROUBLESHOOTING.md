@@ -77,6 +77,13 @@ The multipart endpoint used by `--app workdrive` has a documented maximum of
 250 MB. The bridge rejects larger files locally. Files above 250 MB require
 WorkDrive's separate stream upload endpoint, which is not implemented yet.
 
+### WorkDrive download writes an empty file
+
+`scripts/zoho_download.py` refuses an empty response body and exits non-zero
+without creating the output file. Re-check the resource ID and the requested
+version. MCP cannot deliver file bytes; downloads go through the dedicated
+download host with `WorkDrive.files.READ`.
+
 ### WorkDrive upload response contains no resource ID
 
 The bridge refuses to report success because it cannot perform SHA-256 read-back
