@@ -1087,6 +1087,21 @@ class TestWorkDriveOperationsAndVerification(unittest.TestCase):
             method="GET",
         )
 
+    @patch("bridge.api_request")
+    def test_download_workdrive_file_explains_download_host_scope(self, mock_api):
+        mock_api.return_value = (
+            401,
+            b'{"ERROR_MESSAGE":"INVALID_OAUTHSCOPE","ERROR_CODE":401}',
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            bridge.download_workdrive_file("eu", "tok", "resource123")
+
+        message = str(ctx.exception)
+        self.assertIn("ZohoFiles.files.READ", message)
+        self.assertIn("WorkDrive.files.CREATE,WorkDrive.files.READ", message)
+        self.assertNotIn("tok", message)
+
     @patch("bridge.download_workdrive_file")
     def test_verify_workdrive_file_match_and_mismatch(self, mock_download):
         raw_bytes = b"exact WorkDrive bytes"

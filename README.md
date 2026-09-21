@@ -320,10 +320,10 @@ ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachmen
 For WorkDrive uploads, create the refresh token with:
 
 ```text
-WorkDrive.files.CREATE,WorkDrive.files.READ
+WorkDrive.files.CREATE,WorkDrive.files.READ,ZohoFiles.files.READ
 ```
 
-`WorkDrive.files.CREATE` authorizes `POST /workdrive/api/v1/upload`; `WorkDrive.files.READ` authorizes the download used for verification. A Books- or CRM-only token returns `F7007 Invalid OAuth scope` on every WorkDrive call.
+`WorkDrive.files.CREATE` authorizes `POST /workdrive/api/v1/upload`. `WorkDrive.files.READ` covers WorkDrive metadata access, while `ZohoFiles.files.READ` is additionally required by `GET https://download.zoho.<dc>/v1/workdrive/download/{resource_id}` for byte downloads and SHA-256 verification. A token missing only `ZohoFiles.files.READ` can upload, but download fails with HTTP 401 `INVALID_OAUTHSCOPE`. Scopes are fixed in the refresh token, so generate and exchange a new grant if one is missing.
 
 For Projects task and comment attachments, create the refresh token with:
 

@@ -160,15 +160,18 @@ Source: [Tasks API](https://www.zoho.com/projects/help/rest-api/tasks-api.html).
 WorkDrive file upload, new-version upload, and mandatory SHA-256 read-back require this complete, comma-separated scope string:
 
 ```text
-WorkDrive.files.CREATE,WorkDrive.files.READ
+WorkDrive.files.CREATE,WorkDrive.files.READ,ZohoFiles.files.READ
 ```
 
 | Scope | Why it is required |
 |---|---|
 | `WorkDrive.files.CREATE` | `POST /workdrive/api/v1/upload` uploads the multipart form field named `content`. The same endpoint stores a new top version when `override-name-exist=true`. |
-| `WorkDrive.files.READ` | `GET https://download.zoho.<dc>/v1/workdrive/download/{resource_id}` downloads bytes for SHA-256 verification and for `scripts/zoho_download.py`. |
+| `WorkDrive.files.READ` | Metadata and download authorization on the WorkDrive API host. |
+| `ZohoFiles.files.READ` | `GET https://download.zoho.<dc>/v1/workdrive/download/{resource_id}` serves the actual file bytes for SHA-256 verification and for `scripts/zoho_download.py`. The dedicated download host validates this scope separately; a token without it uploads fine but every download returns HTTP 401 `INVALID_OAUTHSCOPE`. |
 
-Both are required. A Books- or CRM-only refresh token returns `F7007 Invalid OAuth scope` on every WorkDrive call. Generate a new grant with the complete scope string and exchange it for a new refresh token. WorkDrive does **not** use a Books `organization_id`; `--id` is the destination folder ID, resolved through the companion WorkDrive MCP skill.
+All three are required. A Books- or CRM-only refresh token returns `F7007 Invalid OAuth scope` on every WorkDrive call, and a token missing only `ZohoFiles.files.READ` uploads successfully but fails the mandatory read-back with HTTP 401 `INVALID_OAUTHSCOPE`. Scopes are fixed when the refresh token is created; generate a new grant with the complete scope string and exchange it for a new refresh token. WorkDrive does **not** use a Books `organization_id`; `--id` is the destination folder ID, resolved through the companion WorkDrive MCP skill.
+
+Source: [Download File API](https://www.zoho.com/workdrive/developer/docs/api/v1/download-file.html) (lists `WorkDrive.files.READ, ZohoFiles.files.READ`), [Upload API](https://www.zoho.com/workdrive/developer/docs/api/v1/upload-file.html).
 
 WorkDrive endpoint sequence:
 

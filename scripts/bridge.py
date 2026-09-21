@@ -1530,6 +1530,13 @@ def download_workdrive_file(
     status, body = api_request(url, access_token, method="GET")
     if status >= 400:
         err_text = body.decode("utf-8", errors="replace")
+        if status == 401 and "INVALID_OAUTHSCOPE" in err_text:
+            raise RuntimeError(
+                "Failed to download WorkDrive file: HTTP 401 INVALID_OAUTHSCOPE. "
+                "Generate a new Self Client grant with "
+                "WorkDrive.files.CREATE,WorkDrive.files.READ,ZohoFiles.files.READ; "
+                "ZohoFiles.files.READ is required by the dedicated download host."
+            )
         raise RuntimeError(
             f"Failed to download WorkDrive file: HTTP {status} \u2014 {err_text}"
         )
