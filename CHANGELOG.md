@@ -5,6 +5,25 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-09-29
+
+Adds native Zoho Expense report PDF downloads alongside existing Books, CRM, Projects, and WorkDrive adapters.
+
+### Added
+
+- `scripts/zoho_download.py` extended with `--app expense --target report-pdf` support.
+- `expense_base_url()` — Zoho Expense API v1 base URL per data center (`https://www.zohoapis.<tld>/expense/v1`).
+- `build_expense_report_pdf_url()` — builds `GET /expense/v1/expensereports/{id}?organization_id=...&print=true`.
+- `download_expense_report_pdf()` — downloads the report with `Accept: application/pdf` (`ZohoExpense.expensereport.READ` scope) and validates `%PDF` magic bytes.
+- `ZOHO_BRIDGE_EXPENSE_ORG_ID` convenience default in `load_env()`.
+- Unit tests for expense report PDF URL building, download validation, error formatting, and CLI flows.
+
+### Scope note
+
+The exact additional OAuth scope required is `ZohoExpense.expensereport.READ`.
+Zoho scopes are immutable on an existing refresh token: tokens created without it
+must be regenerated with the combined scope list. See `docs/SELF_CLIENT_SETUP.md`.
+
 ## [0.4.0] — 2026-09-18
 
 ### Fixed
@@ -110,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Verified
 
 - The CRM implementation was tested entirely with mocks and temporary files;
-  no live Zoho call, account ID, record ID, or secret was used.
+  no live Zoho call, account ID, record ID, or secret was used.>>>>>>> 8eca3fb (feat: download Zoho Expense report PDFs)
 
 ## [0.2.0] — 2026-09-02
 

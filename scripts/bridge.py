@@ -309,6 +309,7 @@ def load_env(profile: Optional[str] = None) -> Dict[str, str]:
     dc = _get("DC")
     books_org_id = _get("BOOKS_ORG_ID")
     projects_portal_id = _get("PROJECTS_PORTAL_ID")
+    expense_org_id = _get("EXPENSE_ORG_ID")
 
     missing = []
     if not client_id:
@@ -331,6 +332,7 @@ def load_env(profile: Optional[str] = None) -> Dict[str, str]:
         "dc": dc.lower().strip(),
         "books_org_id": books_org_id or "",
         "projects_portal_id": projects_portal_id or "",
+        "expense_org_id": expense_org_id or "",
     }
 
 
@@ -418,6 +420,15 @@ def validate_zoho_id(value: str, label: str) -> str:
     if not normalized.isdigit():
         raise ValueError(f"{label} must contain digits only")
     return normalized
+def expense_base_url(dc: str) -> str:
+    """Return the Zoho Expense API v1 base URL (e.g. https://www.zohoapis.eu/expense/v1)."""
+    resolve_dc(dc)  # validate
+    return f"https://www.{API_DC_MAP[dc.lower().strip()]}/expense/v1"
+def expense_base_url(dc: str) -> str:
+    """Return the Zoho Expense API v1 base URL (e.g. https://www.zohoapis.eu/expense/v1)."""
+    resolve_dc(dc)  # validate
+    return f"https://www.{API_DC_MAP[dc.lower().strip()]}/expense/v1"
+
 
 
 # ---------------------------------------------------------------------------
@@ -880,9 +891,12 @@ def api_request(
     method: Optional[str] = None,
     max_retries: int = 3,
     timeout: int = 60,
+    accept: Optional[str] = None,
 ) -> Tuple[int, bytes]:
     """
     Authenticated HTTP request with 429 Retry-After exponential backoff.
+    `accept` optionally sets the Accept header (e.g. "application/pdf") so
+    endpoints that negotiate a response format return the requested type.
     Never logs access tokens or secrets.
     """
     headers: Dict[str, str] = {
@@ -890,6 +904,8 @@ def api_request(
     }
     if content_type:
         headers["Content-Type"] = content_type
+    if accept:
+        headers["Accept"] = accept
 
     attempt = 0
     while True:
@@ -985,6 +1001,93 @@ def parse_zoho_response(body: bytes, status: int, action_context: str) -> Any:
                     raise RuntimeError(f"{action_context} error (Zoho code {item_code}): {msg}")
 
     return data
+
+
+def format_api_error(context: str, status: int, body: bytes) -> str:
+    """
+    Turn a non-2xx API response into a clear, human-readable error message.
+    Understands both flat Zoho error envelopes ({"code", "message"}) and
+    nested ones ({"error": {"code", "message"}}), falls back to the raw body,
+    and adds a scope hint for authorization failures.
+    Never includes tokens or secrets.
+    """
+    text = body.decode("utf-8", errors="replace").strip()
+    code = None
+    message = None
+    if text:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict):
+            err = data.get("error")
+            if isinstance(err, dict):
+                code = err.get("code")
+                message = err.get("message")
+            elif isinstance(err, str):
+                message = err
+            if code is None:
+                code = data.get("code")
+            if message is None:
+                message = data.get("message")
+
+    if message and code is not None:
+        detail = f"{message} (code: {code})"
+    elif message:
+        detail = str(message)
+    elif code is not None:
+        detail = f"Zoho code {code}"
+    else:
+        detail = text[:400] if text else "no response body"
+
+    msg = f"{context} failed: HTTP {status} — {detail}"
+    if status == 401 or (code and "OAUTHSCOPE" in str(code).upper()):
+        msg += (
+            " (authorization failure: check the OAuth scope for this endpoint; "
+            "scopes on an existing refresh token cannot be added later — "
+            "regenerate the grant token and refresh token with the required scope)"
+        )
+    return msg
+
+
+def write_file_atomic(
+    file_path: str,
+    data: bytes,
+    mode: int = 0o600,
+) -> None:
+    """
+    Write bytes to a file atomically with the given mode (default 0600).
+
+    Data is written to a temporary file in the same directory, flushed,
+    fsynced, then renamed over the target, so readers never observe a
+    partially written file. The temporary file is removed on failure.
+    """
+    target = Path(file_path)
+    parent = target.parent
+    if str(parent) and not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_path = parent / f".{target.name}.{os.getpid()}.tmp"
+    try:
+        fd = os.open(str(tmp_path), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, mode)
+        try:
+            os.write(fd, data)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.chmod(str(tmp_path), mode)
+        os.replace(str(tmp_path), str(target))
+    except BaseException:
+        try:
+            os.unlink(str(tmp_path))
+        except OSError:
+            pass
+        raise
+
+    try:
+        os.chmod(str(target), mode)
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -2006,3 +2109,91 @@ def verify_projects_comment_attachment(
         file_name,
         expected_sha256,
     )
+
+# ---------------------------------------------------------------------------
+# Zoho Expense API — expense report PDF download
+# ---------------------------------------------------------------------------
+
+def build_expense_report_pdf_url(
+    dc: str,
+    organization_id: str,
+    report_id: str,
+    template_id: Optional[str] = None,
+) -> str:
+    """
+    Build the Zoho Expense report PDF download URL.
+
+    GET /expense/v1/expensereports/{report_id}?organization_id=...&print=true
+
+    `template_id` is appended only when it is a plain numeric identifier, so
+    it can never inject extra query parameters or alter the path.
+    Raises ValueError on identifiers that are not plain numeric strings.
+    """
+    for label, value in (
+        ("organization_id", organization_id),
+        ("report id", report_id),
+    ):
+        if not isinstance(value, str) or not value.isdigit():
+            raise ValueError(f"Invalid {label}: expected a numeric identifier")
+
+    params: List[Tuple[str, str]] = [
+        ("organization_id", organization_id),
+        ("print", "true"),
+    ]
+    if template_id is not None:
+        if not isinstance(template_id, str) or not template_id.isdigit():
+            raise ValueError("Invalid template_id: expected a numeric identifier")
+        params.append(("template_id", template_id))
+
+    query = urllib.parse.urlencode(params)
+    return (
+        f"{expense_base_url(dc)}/expensereports/{report_id}?{query}"
+    )
+
+
+def download_expense_report_pdf(
+    dc: str,
+    access_token: str,
+    organization_id: str,
+    report_id: str,
+    template_id: Optional[str] = None,
+) -> bytes:
+    """
+    Download an expense report as PDF from Zoho Expense.
+
+    GET /expense/v1/expensereports/{report_id}?organization_id=...&print=true
+    with Accept: application/pdf (ZohoExpense.expensereport.READ scope).
+
+    Returns the raw PDF bytes after verifying the %PDF header.
+    Raises RuntimeError with a clear message on HTTP/JSON errors, on
+    non-PDF success responses (e.g. HTML or JSON with HTTP 200), or when
+    the response does not start with the %PDF magic bytes.
+    Never logs or exposes the access token.
+    """
+    url = build_expense_report_pdf_url(
+        dc, organization_id, report_id, template_id=template_id
+    )
+    status, body = api_request(
+        url, access_token, method="GET", accept="application/pdf"
+    )
+
+    if status >= 400:
+        raise RuntimeError(
+            format_api_error("Expense report PDF download", status, body)
+        )
+
+    if not body.startswith(b"%PDF"):
+        snippet = body[:200].decode("utf-8", errors="replace").strip()
+        try:
+            parsed = json.loads(body.decode("utf-8", errors="replace"))
+            if isinstance(parsed, dict):
+                snippet = json.dumps(parsed)[:400]
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+        raise RuntimeError(
+            "Expense report PDF download failed: response was not a PDF "
+            f"(missing %PDF header) — {snippet or 'empty response body'}"
+        )
+
+    return body
+

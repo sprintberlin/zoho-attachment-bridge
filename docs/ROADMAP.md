@@ -2,7 +2,7 @@
 
 Tracked in GitHub issues. This file is the index, not a second tracker.
 
-Current release: **0.4.0 (unreleased)**. Books expense receipts are implemented and verified live. Bill and journal attachments are implemented but only unit-tested. CRM v8 record attachments and WorkDrive file/version uploads are implemented with mocked upload/download SHA-256 verification.
+Current release: **0.5.0**. Zoho Expense report PDF downloads are implemented and unit-tested. Books expense receipts are implemented and verified live. Bill and journal attachments, CRM v8 record attachments, Projects attachments, and WorkDrive file/version uploads/downloads are implemented.
 
 ## 0.1.0 — scaffolding
 
@@ -19,13 +19,22 @@ Completed. Repository, configuration contract, MCP failure documentation, Self C
 - [x] File size pre-check (local rejection before multipart construction, configurable per target) — [#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2)
 - [ ] Live-verify bill attachments — [#1](https://github.com/sprintberlin/zoho-attachment-bridge/issues/1)
 
-## 0.3.0 — CRM and Projects
+## 0.3.0 — Expense report PDF download
+
+- [x] Expense API base URL per data center
+- [x] `GET /expense/v1/expensereports/{id}?organization_id=...&print=true` with `Accept: application/pdf`
+- [x] Optional `template_id`, numeric identifiers only
+- [x] `%PDF` header validation and JSON/HTTP error surfacing
+- [x] Atomic mode-`0600` CLI output (`scripts/zoho_download.py`)
+- [ ] Live-verify against a Zoho Expense test organization
+
+## 0.4.0 — CRM and Projects
 
 - [x] CRM record attachments (`POST /crm/v8/{module}/{record_id}/Attachments`) — mocked upload/list/download SHA-256 verification ([#3](https://github.com/sprintberlin/zoho-attachment-bridge/issues/3))
 - [x] Projects task and comment attachments (`POST /restapi/portal/{portal}/projects/{project}/tasks/{task}/attachments/` and `/comments/`) — mocked upload/list/download SHA-256 verification ([#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4))
 - [x] Organization and portal resolution helpers — [#10](https://github.com/sprintberlin/zoho-attachment-bridge/issues/10)
 
-## 0.4.0 — Inventory and WorkDrive
+## 0.5.0 — Inventory and WorkDrive
 
 Companion MCP skill: [openclaw-zoho-workdrive-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-workdrive-mcp-skill) (resolves teams, team folders, folders, and resource IDs via MCP before uploads).
 
@@ -50,7 +59,7 @@ Follow [CONTRIBUTING.md](../CONTRIBUTING.md): search or file an issue first; whe
 ## Out of scope for now
 
 - HTTP service mode. The scripts stay callable from the command line.
-- Inline image extraction and OCR. Plain downloads are covered since [#16](https://github.com/sprintberlin/zoho-attachment-bridge/issues/16); MCP returns metadata only and cannot deliver file bytes into the agent workspace.
+- Inline image extraction and OCR. Plain downloads are covered for WorkDrive files and Expense report PDFs; MCP returns metadata only and cannot deliver file bytes into the agent workspace.
 
 ## Watch list
 

@@ -1,13 +1,15 @@
 ---
 name: zoho-attachment-bridge
-description: Upload and SHA-256-verify binary files in Zoho via REST when MCP uploads fail; improve the skill through issue-first GitHub contributions.
+description: Upload and SHA-256-verify binary files in Zoho via REST when MCP uploads fail, and download binary exports such as Zoho Expense report PDFs; improve the skill through issue-first GitHub contributions.
 ---
 
 # Zoho Attachment Bridge
 
-Use REST multipart uploads for local binary files. Keep MCP for record lookup, reads, and writes.
+Use REST multipart uploads for local binary files and REST downloads for binary exports such as Zoho Expense report PDFs. Keep MCP for record lookup, reads, and writes.
 
 Source: [sprintberlin/zoho-attachment-bridge](https://github.com/sprintberlin/zoho-attachment-bridge)
+
+> **Status: 0.5.0.** Books expense receipts verified live; CRM v8, Projects, and WorkDrive adapters implemented with mocked SHA-256 verification; Zoho Expense report PDF download implemented and unit-tested. See `CHANGELOG.md`, `docs/ROADMAP.md` and `docs/TROUBLESHOOTING.md`.
 
 ## Contract
 
@@ -16,6 +18,13 @@ Source: [sprintberlin/zoho-attachment-bridge](https://github.com/sprintberlin/zo
 - Confirm the Books organization or Projects portal before upload.
 - Never print, log, commit, or report credentials, endpoints, customer data, record IDs, organization IDs, portal IDs, or live filenames.
 - Respect HTTP 429 and `Retry-After`.
+
+| Situation | Use |
+|---|---|
+| Read records, list attachments, update fields | Zoho MCP |
+| Attach PDF, image, receipt, any binary file | This skill |
+| MCP upload returned `success` with empty array | This skill |
+| Download a formatted expense report PDF export | This skill (`zoho_download.py`) |
 
 ## Improve during daily use
 
@@ -44,8 +53,28 @@ Do not file issues for one-off authentication, rate limits, timeouts, or tenant-
 
 Required:
 
-| Variable | Meaning |
-|---|---|
+| Variable | Required | Description |
+|---|---|---|
+| `ZOHO_BRIDGE_CLIENT_ID` | yes | Self Client ID from the Zoho API Console |
+| `ZOHO_BRIDGE_CLIENT_SECRET` | yes | Self Client secret |
+| `ZOHO_BRIDGE_REFRESH_TOKEN` | yes | Long-lived refresh token |
+| `ZOHO_BRIDGE_DC` | yes | Data center: `eu`, `com`, `in`, `com.au`, `jp`, `ca`, `sa`, `com.cn` |
+| `ZOHO_BRIDGE_BOOKS_ORG_ID` | no | Default Books organization id |
+| `ZOHO_BRIDGE_EXPENSE_ORG_ID` | no | Default Zoho Expense organization id |
+| `ZOHO_BRIDGE_PROJECTS_PORTAL_ID` | no | Default Projects portal id |
+| `ZOHO_BRIDGE_TOKEN_CACHE` | no | Override path for the access token cache |
+
+Multi-tenant: prefix per profile, e.g. `ZOHO_BRIDGE_ACME_CLIENT_ID`, selected with `--profile acme`.
+
+Access tokens are never stored in env. They are derived from the refresh token and cached in `~/.cache/zoho-attachment-bridge/tokens.json` (mode 0600) until shortly before expiry. The cache key is a hash; no secret is written in clear text. Without it, Zoho rate-limits the token endpoint after repeated calls.
+
+## File type limits
+
+Zoho enforces different allowlists per endpoint:
+
+| Target | Allowed extensions |
+
+## Upload|---|---|
 | `ZOHO_BRIDGE_CLIENT_ID` | Self Client ID |
 | `ZOHO_BRIDGE_CLIENT_SECRET` | Self Client secret |
 | `ZOHO_BRIDGE_REFRESH_TOKEN` | Refresh token |
@@ -78,6 +107,9 @@ Run `python3 scripts/onboarding.py`.
 - CRM: `ZohoCRM.modules.ALL,ZohoCRM.modules.attachments.CREATE,ZohoCRM.modules.attachments.READ`
 - WorkDrive: `WorkDrive.files.CREATE,WorkDrive.files.READ,ZohoFiles.files.READ`
 - Projects: `ZohoProjects.tasks.READ,ZohoProjects.tasks.CREATE,ZohoPC.files.ALL`
+- Expense: `ZohoExpense.expensereport.READ`
+
+Scopes on an existing refresh token are immutable. Add a new scope by generating a new grant and refresh token with the complete scope list.
 - Optional discovery: `ZohoBooks.settings.READ,ZohoProjects.portals.READ`
 
 Do not use `ZohoBooks.fullaccess.ALL`. Details: [docs/SELF_CLIENT_SETUP.md](docs/SELF_CLIENT_SETUP.md).
@@ -112,6 +144,19 @@ python3 scripts/zoho_attach.py --app projects --target task-attachment --project
 python3 scripts/zoho_attach.py --app projects --target comment-attachment --project-id <project_id> --id <task_id> --file <path> [--comment <text>] [--portal-id <portal_id>]
 ```
 
+## Download
+
+```bash
+# WorkDrive file download
+python3 scripts/zoho_download.py --app workdrive --id <resource_id> --out <path> [--version <v>] [--overwrite]
+
+# Expense report PDF download (Zoho Expense)
+python3 scripts/zoho_download.py --app expense --target report-pdf \
+  --id <report_id> --out <path.pdf> [--organization-id <id>] [--template-id <id>] [--profile <name>]
+```
+
+Calls `GET /expense/v1/expensereports/{id}?organization_id=...&print=true` with `Accept: application/pdf`, validates the `%PDF` header, and writes the output atomically with mode `0600`. Requires `ZohoExpense.expensereport.READ`.
+
 ## Coverage
 
 | App | Target | Status |
@@ -123,6 +168,7 @@ python3 scripts/zoho_attach.py --app projects --target comment-attachment --proj
 | WorkDrive | file upload, new version | mocked upload/download verification ([#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9)) |
 | WorkDrive | download to local workspace | mocked download verification ([#16](https://github.com/sprintberlin/zoho-attachment-bridge/issues/16)) |
 | Projects | task and comment attachment | mocked upload/list/download verification |
+| Expense | report PDF download | unit tested |
 | Inventory | item image, bill attachment | planned ([#8](https://github.com/sprintberlin/zoho-attachment-bridge/issues/8)) |
 
 Next work: [docs/ROADMAP.md](docs/ROADMAP.md) and [issues](https://github.com/sprintberlin/zoho-attachment-bridge/issues).
