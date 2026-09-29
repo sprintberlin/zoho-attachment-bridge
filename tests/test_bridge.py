@@ -7,6 +7,7 @@ No external network calls, no live secrets.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -2131,3 +2132,385 @@ class TestCliZohoDownload(unittest.TestCase):
             self.assertEqual(out.read_bytes(), b"replacement")
             leftovers = [p.name for p in Path(tmpdir).iterdir() if p != out]
             self.assertEqual(leftovers, [])
+
+
+class TestExpenseReportPdfUrl(unittest.TestCase):
+    """Expense API base URL and report PDF URL building."""
+
+    def test_expense_base_url_all_dcs(self):
+        expected = {
+            "eu": "https://www.zohoapis.eu/expense/v1",
+            "com": "https://www.zohoapis.com/expense/v1",
+            "in": "https://www.zohoapis.in/expense/v1",
+            "com.au": "https://www.zohoapis.com.au/expense/v1",
+            "jp": "https://www.zohoapis.jp/expense/v1",
+            "ca": "https://www.zohoapis.ca/expense/v1",
+            "sa": "https://www.zohoapis.sa/expense/v1",
+            "com.cn": "https://www.zohoapis.com.cn/expense/v1",
+        }
+        for dc, url in expected.items():
+            self.assertEqual(bridge.expense_base_url(dc), url)
+
+    def test_expense_base_url_rejects_invalid_dc(self):
+        with self.assertRaises(ValueError):
+            bridge.expense_base_url("invalid_dc")
+
+    def test_report_pdf_url_basic(self):
+        url = bridge.build_expense_report_pdf_url("eu", "12345678", "987654321")
+        self.assertEqual(
+            url,
+            "https://www.zohoapis.eu/expense/v1/expensereports/987654321"
+            "?organization_id=12345678&print=true",
+        )
+
+    def test_report_pdf_url_with_template(self):
+        url = bridge.build_expense_report_pdf_url(
+            "com", "12345678", "987654321", template_id="424242"
+        )
+        self.assertIn("organization_id=12345678", url)
+        self.assertIn("print=true", url)
+        self.assertIn("template_id=424242", url)
+
+    def test_report_pdf_url_rejects_non_numeric_ids(self):
+        for bad_org in ["", "abc", "123;drop", "1 2", "123&x=1"]:
+            with self.assertRaises(ValueError):
+                bridge.build_expense_report_pdf_url("eu", bad_org, "123")
+        for bad_id in ["", "abc", "1;drop", "../etc", "123&print=false"]:
+            with self.assertRaises(ValueError):
+                bridge.build_expense_report_pdf_url("eu", "123", bad_id)
+
+    def test_report_pdf_url_rejects_bad_template_id(self):
+        for bad_tpl in ["", "abc", "1&print=false", "1;2"]:
+            with self.assertRaises(ValueError):
+                bridge.build_expense_report_pdf_url(
+                    "eu", "123", "456", template_id=bad_tpl
+                )
+        # None is fine (no template parameter).
+        url = bridge.build_expense_report_pdf_url(
+            "eu", "123", "456", template_id=None
+        )
+        self.assertNotIn("template_id", url)
+
+
+class TestExpenseReportPdfDownload(unittest.TestCase):
+    """Expense report PDF download incl. header checks and error surfacing."""
+
+    @patch("bridge.api_request")
+    def test_download_success_sends_get_and_accept(self, mock_api):
+        mock_api.return_value = (200, b"%PDF-1.7 fake pdf bytes")
+
+        data = bridge.download_expense_report_pdf(
+            dc="eu", access_token="tok", organization_id="123", report_id="456"
+        )
+        self.assertEqual(data, b"%PDF-1.7 fake pdf bytes")
+        args, kwargs = mock_api.call_args
+        self.assertIn("/expense/v1/expensereports/456", args[0])
+        self.assertIn("organization_id=123", args[0])
+        self.assertIn("print=true", args[0])
+        self.assertEqual(kwargs.get("method"), "GET")
+        self.assertEqual(kwargs.get("accept"), "application/pdf")
+
+    @patch("bridge.api_request")
+    def test_download_401_scope_error_is_surfaced(self, mock_api):
+        body = json.dumps({
+            "code": 57,
+            "message": "You are not authorized to perform this operation",
+        }).encode("utf-8")
+        mock_api.return_value = (401, body)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            bridge.download_expense_report_pdf(
+                dc="eu",
+                access_token="secret_bearer_value",
+                organization_id="123",
+                report_id="456",
+            )
+        msg = str(ctx.exception)
+        self.assertIn("HTTP 401", msg)
+        self.assertIn("not authorized", msg)
+        self.assertIn("scope", msg.lower())
+        self.assertNotIn("secret_bearer_value", msg)
+
+    @patch("bridge.api_request")
+    def test_download_wrong_scope_nested_error_is_surfaced(self, mock_api):
+        body = json.dumps({
+            "error": {
+                "code": "INVALID_OAUTHSCOPE",
+                "message": "The scope for this access token is invalid",
+            }
+        }).encode("utf-8")
+        mock_api.return_value = (401, body)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            bridge.download_expense_report_pdf(
+                dc="com", access_token="tok", organization_id="123", report_id="456"
+            )
+        msg = str(ctx.exception)
+        self.assertIn("INVALID_OAUTHSCOPE", msg)
+        self.assertIn("regenerate", msg)
+
+    @patch("bridge.api_request")
+    def test_download_non_pdf_200_raises(self, mock_api):
+        mock_api.return_value = (
+            200,
+            json.dumps({"code": 0, "message": "success"}).encode("utf-8"),
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            bridge.download_expense_report_pdf(
+                dc="eu", access_token="tok", organization_id="123", report_id="456"
+            )
+        self.assertIn("%PDF", str(ctx.exception))
+
+    @patch("bridge.api_request")
+    def test_download_html_200_raises(self, mock_api):
+        mock_api.return_value = (200, b"<html><body>login page</body></html>")
+        with self.assertRaises(RuntimeError) as ctx:
+            bridge.download_expense_report_pdf(
+                dc="eu", access_token="tok", organization_id="123", report_id="456"
+            )
+        self.assertIn("%PDF", str(ctx.exception))
+
+
+class TestFormatApiError(unittest.TestCase):
+    """Structured HTTP error formatting with scope hints."""
+
+    def test_flat_zoho_envelope(self):
+        body = json.dumps({"code": 57, "message": "not authorized"}).encode()
+        msg = bridge.format_api_error("Download", 401, body)
+        self.assertIn("HTTP 401", msg)
+        self.assertIn("not authorized (code: 57)", msg)
+
+    def test_nested_error_envelope(self):
+        body = json.dumps({
+            "error": {"code": "INVALID_OAUTHSCOPE", "message": "bad scope"}
+        }).encode()
+        msg = bridge.format_api_error("Download", 401, body)
+        self.assertIn("bad scope", msg)
+        self.assertIn("INVALID_OAUTHSCOPE", msg)
+
+    def test_non_json_body(self):
+        msg = bridge.format_api_error("Download", 500, b"<html>oops</html>")
+        self.assertIn("HTTP 500", msg)
+        self.assertIn("<html>oops</html>", msg)
+
+    def test_scope_hint_on_401(self):
+        msg = bridge.format_api_error("Download", 401, b"unauthorized")
+        self.assertIn("regenerate", msg)
+
+
+class TestWriteFileAtomic(unittest.TestCase):
+    """Atomic file writing with mode enforcement."""
+
+    def test_writes_bytes_atomically_with_mode_0600(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = os.path.join(tmpdir, "report.pdf")
+            bridge.write_file_atomic(target, b"%PDF-1.7 atomic")
+            mode = stat.S_IMODE(os.stat(target).st_mode)
+            self.assertEqual(mode, 0o600)
+            with open(target, "rb") as fh:
+                self.assertEqual(fh.read(), b"%PDF-1.7 atomic")
+
+    def test_replaces_existing_file_and_keeps_mode_0600(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = os.path.join(tmpdir, "report.pdf")
+            with open(target, "wb") as fh:
+                fh.write(b"old content with loose permissions")
+            os.chmod(target, 0o644)
+            bridge.write_file_atomic(target, b"%PDF-1.7 new")
+            mode = stat.S_IMODE(os.stat(target).st_mode)
+            self.assertEqual(mode, 0o600)
+            with open(target, "rb") as fh:
+                self.assertEqual(fh.read(), b"%PDF-1.7 new")
+
+    def test_no_temp_files_left_behind(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = os.path.join(tmpdir, "report.pdf")
+            bridge.write_file_atomic(target, b"data")
+            leftovers = [
+                name for name in os.listdir(tmpdir) if name != "report.pdf"
+            ]
+            self.assertEqual(leftovers, [])
+
+    def test_creates_missing_parent_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = os.path.join(tmpdir, "sub", "dir", "report.pdf")
+            bridge.write_file_atomic(target, b"nested")
+            self.assertTrue(os.path.isfile(target))
+
+
+class TestCliZohoDownloadExpense(unittest.TestCase):
+    """Test zoho_download CLI execution."""
+
+    @patch("zoho_download.download_expense_report_pdf")
+    @patch("zoho_download.refresh_access_token", return_value="mock_access_token")
+    @patch("zoho_download.load_env")
+    def test_successful_download_writes_atomic_0600(
+        self, mock_env, mock_tok, mock_dl
+    ):
+        mock_env.return_value = {
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "reftok",
+            "dc": "eu",
+            "books_org_id": "",
+            "expense_org_id": "org777",
+        }
+        mock_dl.return_value = b"%PDF-1.7 downloaded report"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_path = os.path.join(tmpdir, "report.pdf")
+            ret = zoho_download.main([
+                "--app", "expense",
+                "--target", "report-pdf",
+                "--id", "987654321",
+                "--out", out_path,
+            ])
+            self.assertEqual(ret, 0)
+            mock_dl.assert_called_once()
+            kwargs = mock_dl.call_args.kwargs
+            self.assertEqual(kwargs["organization_id"], "org777")
+            self.assertIsNone(kwargs["template_id"])
+
+            mode = stat.S_IMODE(os.stat(out_path).st_mode)
+            self.assertEqual(mode, 0o600)
+            with open(out_path, "rb") as fh:
+                self.assertEqual(fh.read(), b"%PDF-1.7 downloaded report")
+
+    @patch("zoho_download.download_expense_report_pdf")
+    @patch("zoho_download.refresh_access_token", return_value="mock_access_token")
+    @patch("zoho_download.load_env")
+    def test_cli_passes_template_and_cli_org(self, mock_env, mock_tok, mock_dl):
+        mock_env.return_value = {
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "reftok",
+            "dc": "com",
+            "books_org_id": "org_from_env",
+            "expense_org_id": "",
+        }
+        mock_dl.return_value = b"%PDF-1.4 ok"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_path = os.path.join(tmpdir, "r.pdf")
+            ret = zoho_download.main([
+                "--app", "expense",
+                "--target", "report-pdf",
+                "--id", "111",
+                "--out", out_path,
+                "--organization-id", "222",
+                "--template-id", "333",
+            ])
+            self.assertEqual(ret, 0)
+            kwargs = mock_dl.call_args.kwargs
+            self.assertEqual(kwargs["organization_id"], "222")
+            self.assertEqual(kwargs["template_id"], "333")
+
+    @patch("zoho_download.load_env")
+    def test_missing_organization_id_fails_without_network(self, mock_env):
+        mock_env.return_value = {
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "reftok",
+            "dc": "eu",
+            "books_org_id": "",
+            "expense_org_id": "",
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_path = os.path.join(tmpdir, "r.pdf")
+            ret = zoho_download.main([
+                "--app", "expense",
+                "--target", "report-pdf",
+                "--id", "111",
+                "--out", out_path,
+            ])
+            self.assertEqual(ret, 1)
+            self.assertFalse(os.path.exists(out_path))
+
+    @patch("zoho_download.download_expense_report_pdf")
+    @patch("zoho_download.refresh_access_token", return_value="mock_access_token")
+    @patch("zoho_download.load_env")
+    def test_download_failure_returns_1_and_writes_nothing(
+        self, mock_env, mock_tok, mock_dl
+    ):
+        mock_env.return_value = {
+            "client_id": "cid",
+            "client_secret": "csec",
+            "refresh_token": "reftok",
+            "dc": "eu",
+            "books_org_id": "",
+            "expense_org_id": "org777",
+        }
+        mock_dl.side_effect = RuntimeError(
+            "Expense report PDF download failed: HTTP 401 — not authorized (scope)"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_path = os.path.join(tmpdir, "r.pdf")
+            ret = zoho_download.main([
+                "--app", "expense",
+                "--target", "report-pdf",
+                "--id", "111",
+                "--out", out_path,
+            ])
+            self.assertEqual(ret, 1)
+            self.assertFalse(os.path.exists(out_path))
+
+    @patch("zoho_download.load_env")
+    def test_unsupported_app_target_rejected_by_argparse(self, mock_env):
+        with self.assertRaises(SystemExit):
+            zoho_download.parse_args([
+                "--app", "books",
+                "--target", "report-pdf",
+                "--id", "1",
+                "--out", "x.pdf",
+            ])
+
+    @patch("zoho_download.refresh_access_token", return_value="mock_access_token")
+    @patch("zoho_download.load_env")
+    def test_failure_output_contains_no_token(self, mock_env, mock_tok):
+        mock_env.return_value = {
+            "client_id": "cid",
+            "client_secret": "csec-secret-value",
+            "refresh_token": "reftok-secret-value",
+            "dc": "eu",
+            "books_org_id": "",
+            "expense_org_id": "org777",
+        }
+        err_io = io.StringIO()
+        with contextlib.redirect_stderr(err_io):
+            with patch(
+                "zoho_download.refresh_access_token",
+                side_effect=RuntimeError("Token refresh failed: HTTP 401 — bad grant"),
+            ):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    ret = zoho_download.main([
+                        "--app", "expense",
+                        "--target", "report-pdf",
+                        "--id", "111",
+                        "--out", os.path.join(tmpdir, "r.pdf"),
+                    ])
+        self.assertEqual(ret, 1)
+        captured = err_io.getvalue()
+        self.assertNotIn("csec-secret-value", captured)
+        self.assertNotIn("reftok-secret-value", captured)
+        self.assertNotIn("mock_access_token", captured)
+
+
+class TestLoadEnvExpenseOrgId(unittest.TestCase):
+    """Expense organization id config plumbing."""
+
+    def test_load_env_reads_expense_org_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_env = Path(tmpdir) / ".env"
+            local_env.write_text(
+                "ZOHO_BRIDGE_CLIENT_ID=cid\n"
+                "ZOHO_BRIDGE_CLIENT_SECRET=csec\n"
+                "ZOHO_BRIDGE_REFRESH_TOKEN=rtok\n"
+                "ZOHO_BRIDGE_DC=eu\n"
+                "ZOHO_BRIDGE_EXPENSE_ORG_ID=555000\n",
+                encoding="utf-8",
+            )
+            with patch("pathlib.Path.cwd", return_value=Path(tmpdir)), \
+                 patch("pathlib.Path.home", return_value=Path(tmpdir)):
+                with patch.dict(os.environ, {}, clear=True):
+                    loaded = bridge.load_env()
+                    self.assertEqual(loaded["expense_org_id"], "555000")

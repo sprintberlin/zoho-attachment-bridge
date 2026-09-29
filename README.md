@@ -18,7 +18,7 @@
 
 ---
 
-> **Status: 0.4.0 (unreleased).** Books expense receipts remain implemented and verified live; CRM v8 record attachments and WorkDrive file/version uploads are implemented with mocked upload/download SHA-256 verification. Bill and journal attachments are implemented but only unit-tested. Next work is in
+> **Status: 0.5.0.** Books expense receipts remain implemented and verified live; CRM v8 record attachments, Projects attachments, and WorkDrive file/version uploads and downloads are implemented with mocked SHA-256 verification. Zoho Expense report PDF downloads are implemented and unit-tested. Bill and journal attachments are implemented but only unit-tested. Next work is in
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) and the [issue tracker](https://github.com/sprintberlin/zoho-attachment-bridge/issues).
 
 ---
@@ -103,6 +103,7 @@ The agent keeps using MCP for everything else. The moment a file is involved, it
 
 - **🔐 Self Client OAuth** — server-to-server auth with no redirect URI, no browser round trip, no user session. Exactly what an autonomous agent needs.
 - **📎 Real multipart uploads** — the request Zoho's REST API actually expects, built properly.
+- **⬇️ Binary downloads** — export Zoho Expense report PDFs directly from the REST API, with `%PDF` validation and atomic mode `0600` writes.
 - **✅ Verified, not assumed** — every upload is confirmed by re-reading the record's attachments. Exit code `0` only when the file is provably there.
 - **🌍 Multi-data-center** — EU, US, IN, AU, JP, CA, SA, CN.
 - **🧰 One tool, many apps** — a single entry point with per-app adapters. Auth, retries, verification and error handling are written once.
@@ -134,6 +135,7 @@ Deliberately minimal. **Four variables** are all that is globally required.
 | `ZOHO_BRIDGE_REFRESH_TOKEN` | ✅ | Long-lived refresh token |
 | `ZOHO_BRIDGE_DC` | ✅ | Data center: `eu`, `com`, `in`, `com.au`, `jp`, `ca`, `sa`, `com.cn` |
 | `ZOHO_BRIDGE_BOOKS_ORG_ID` | ➖ | Convenience default for Books |
+| `ZOHO_BRIDGE_EXPENSE_ORG_ID` | ➖ | Convenience default for Zoho Expense |
 | `ZOHO_BRIDGE_PROJECTS_PORTAL_ID` | ➖ | Convenience default for Projects |
 | `ZOHO_BRIDGE_TOKEN_CACHE` | ➖ | Override path for the access token cache |
 
@@ -335,6 +337,27 @@ ZohoProjects.tasks.READ,ZohoProjects.tasks.CREATE,ZohoPC.files.ALL
 
 Exit code `0` only after the uploaded file was confirmed present on the record via SHA-256 read-back verification.
 
+### 4. Download an expense report PDF
+
+```bash
+python3 scripts/zoho_download.py \
+  --app expense \
+  --target report-pdf \
+  --id 987654321098765432 \
+  --out ~/downloads/report.pdf \
+  --organization-id 12345678
+```
+
+`--organization-id` falls back to `ZOHO_BRIDGE_EXPENSE_ORG_ID`, then to
+`ZOHO_BRIDGE_BOOKS_ORG_ID`. `--template-id` is optional and must be a plain
+numeric identifier; it is appended to the request only when it passes that
+check. `--profile` selects a named configuration profile.
+
+The download issues `GET /expense/v1/expensereports/{id}?organization_id=...&print=true`
+with `Accept: application/pdf`, validates the `%PDF` header, and writes the file
+atomically with mode `0600`. HTTP and JSON errors are surfaced with their Zoho
+code and message; the access token is never logged.
+
 ---
 
 ## Coverage
@@ -350,6 +373,7 @@ Exit code `0` only after the uploaded file was confirmed present on the record v
 | WorkDrive | file upload, new version | implemented, mocked upload/download verification | [#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9) |
 | WorkDrive | download to local workspace | implemented, mocked download verification | [#16](https://github.com/sprintberlin/zoho-attachment-bridge/issues/16) |
 | Projects | task and comment attachment | implemented, mocked upload/download verification | [#4](https://github.com/sprintberlin/zoho-attachment-bridge/issues/4) |
+| Expense | report PDF download | implemented, unit tests only | — |
 | Inventory | item image, bill attachment | planned | [#8](https://github.com/sprintberlin/zoho-attachment-bridge/issues/8) |
 
 Progress and next work: [`docs/ROADMAP.md`](docs/ROADMAP.md). Open issues: [sprintberlin/zoho-attachment-bridge/issues](https://github.com/sprintberlin/zoho-attachment-bridge/issues).
@@ -363,6 +387,7 @@ This bridge only moves bytes. Record lookup, navigation, and metadata stay with 
 | WorkDrive | [openclaw-zoho-workdrive-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-workdrive-mcp-skill) |
 | CRM | [openclaw-zoho-crm-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-crm-mcp-skill) |
 | Books | [openclaw-zoho-books-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-books-mcp-skill) |
+| Expense | [openclaw-zoho-expense-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-expense-mcp-skill) |
 
 Typical WorkDrive split: resolve the destination folder ID with the WorkDrive MCP skill, upload the bytes here with `--app workdrive`, then read the file back and create share links over MCP again.
 
@@ -375,12 +400,17 @@ WorkDrive uses a different host for each direction, which is easy to get wrong:
 
 Both a new file and a new version use the same upload endpoint. The `override-name-exist` form field decides: `true` stores the bytes as a new top version of an existing file with that name, `false` appends a timestamp instead.
 
+Working with Zoho Expense beyond this skill? The companion
+[sprintberlin/openclaw-zoho-expense-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-expense-mcp-skill)
+repository documents the Zoho Expense MCP setup, actions and scopes.
+
 ---
 
 ## 🔒 Security
 
 - Treat `ZOHO_BRIDGE_REFRESH_TOKEN` like a password. It grants standing API access until revoked. Never commit it, never print it, never paste it into a chat.
-- Request the **narrowest scope** per app. Do not use `ZohoBooks.fullaccess.ALL`. For CRM record attachments, `ZohoCRM.modules.ALL` is additionally needed for the parent module, alongside `ZohoCRM.modules.attachments.CREATE` and `ZohoCRM.modules.attachments.READ`. WorkDrive uploads need `WorkDrive.files.CREATE` and `WorkDrive.files.READ`. Projects attachments need `ZohoProjects.tasks.READ`, `ZohoProjects.tasks.CREATE`, and `ZohoPC.files.ALL`.
+- Request the **narrowest scope** per app. Do not use `ZohoBooks.fullaccess.ALL`. For CRM record attachments, `ZohoCRM.modules.ALL` is additionally needed for the parent module, alongside `ZohoCRM.modules.attachments.CREATE` and `ZohoCRM.modules.attachments.READ`. WorkDrive uploads need `WorkDrive.files.CREATE` and `WorkDrive.files.READ`. Projects attachments need `ZohoProjects.tasks.READ`, `ZohoProjects.tasks.CREATE`, and `ZohoPC.files.ALL`. Expense report PDF downloads need `ZohoExpense.expensereport.READ`.
+- Zoho scopes are immutable on an existing refresh token: tokens created without a new scope must be regenerated (new grant token, new refresh token).
 - WorkDrive resource IDs are opaque strings. Resolve them through the WorkDrive MCP skill and never derive one from a path or file name.
 - Revoke unused Self Clients in the API Console.
 - Uploads are subject to Zoho rate limits and per-plan file size limits. The bridge backs off on HTTP 429. Local file size pre-checks enforce documented limits before upload (Books 7 MB / 5 MB, WorkDrive 250 MB; CRM only when configured) via `--max-bytes` or env vars ([#2](https://github.com/sprintberlin/zoho-attachment-bridge/issues/2)).

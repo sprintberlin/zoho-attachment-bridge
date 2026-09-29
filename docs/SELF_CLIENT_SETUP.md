@@ -193,6 +193,22 @@ The following entries are planning notes for later adapters and must be rechecke
 
 Read access is part of the bridge contract. The bridge must verify every upload instead of trusting an HTTP status or success message.
 
+### Scope for the Zoho Expense report PDF download (0.3.0+)
+
+The report PDF downloader talks to the Zoho Expense API and requires this exact additional OAuth scope:
+
+```text
+ZohoExpense.expensereport.READ
+```
+
+| Scope | Why it is required |
+|---|---|
+| `ZohoExpense.expensereport.READ` | `GET /expense/v1/expensereports/{report_id}?organization_id=...&print=true` with `Accept: application/pdf` |
+
+> ⚠️ **Existing refresh-token scopes are immutable.** Zoho fixes the scope set when the grant token is exchanged. A refresh token created without `ZohoExpense.expensereport.READ` can never gain it: generate a new grant token in the API Console with the complete desired scope list (Books scopes plus the Expense scope, comma separated), exchange it within its short lifetime, and store the new refresh token. The old token keeps working with its old scopes until revoked; Zoho limits active refresh tokens to 20 per user.
+
+The endpoint is served from the same `www.zohoapis.<tld>` API host family as Books (see the data-center table above and `docs/TROUBLESHOOTING.md`). For Zoho Expense MCP context — endpoint setup, actions and scope catalog — see the companion repository [sprintberlin/openclaw-zoho-expense-mcp-skill](https://github.com/sprintberlin/openclaw-zoho-expense-mcp-skill).
+
 ---
 
 
@@ -280,13 +296,14 @@ The onboarding script finishes with a real upload followed by a read-back check.
 | `invalid_code` | Grant token expired or already used. Generate a new one. |
 | `invalid_client` | Client ID and secret belong to a different data center. |
 | `INVALID_OAUTHSCOPE` on a real call | Scope missing at grant time. Scopes cannot be added later, generate a new grant token. |
+| Expense report PDF download returns HTTP 401 or `INVALID_OAUTHSCOPE` | The refresh token predates this feature and lacks `ZohoExpense.expensereport.READ`. Scopes on an existing refresh token are immutable: regenerate the grant token with the complete scope list and exchange it for a new refresh token. |
 | Upload succeeds but the file is not on the record | Not an auth problem. This is the Zoho MCP failure mode the bridge exists to avoid. |
 
 ---
 
 ## Rotating or revoking
 
-Refresh tokens preserve the scopes selected during grant creation. To add or change scopes, generate a new grant token with the complete desired scope list and exchange it for a new refresh token.
+Refresh tokens preserve the scopes selected during grant creation. To add or change scopes, generate a new grant token with the complete desired scope list and exchange it for a new refresh token. The scope set is fixed at creation time and can never be extended on the existing token.
 
 A refresh token remains valid until it is revoked. To revoke access, delete or revoke the Self Client/token in the Zoho API Console. Any agent using it stops working immediately, so plan for that.
 
