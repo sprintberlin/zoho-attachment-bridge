@@ -128,6 +128,7 @@ python3 scripts/discover.py projects-portals [--profile <name>] [--json]
 python3 scripts/zoho_attach.py --app books --target expense-receipt --id <expense_id> --file <path> [--organization-id <org_id>]
 python3 scripts/zoho_attach.py --app books --target bill-attachment --id <bill_id> --file <path> [--organization-id <org_id>]
 python3 scripts/zoho_attach.py --app books --target journal-attachment --id <journal_id> --file <path> [--organization-id <org_id>]
+python3 scripts/zoho_attach.py --app books --target salesorder-attachment --id <salesorder_id> --file <path> [--organization-id <org_id>]
 
 # CRM
 python3 scripts/zoho_attach.py --app crm --target record-attachment --module <module> --id <record_id> --file <path>
@@ -164,6 +165,7 @@ Calls `GET /expense/v1/expensereports/{id}?organization_id=...&print=true` with 
 | Books | expense receipt | live verified |
 | Books | bill attachment | unit tested; live verification [#1](https://github.com/sprintberlin/zoho-attachment-bridge/issues/1) |
 | Books | journal attachment | unit tested ([#12](https://github.com/sprintberlin/zoho-attachment-bridge/issues/12)) |
+| Books | sales order attachment | unit tested ([#23](https://github.com/sprintberlin/zoho-attachment-bridge/issues/23)) |
 | CRM | record attachment | mocked upload/list/download verification |
 | WorkDrive | file upload, new version | mocked upload/download verification ([#9](https://github.com/sprintberlin/zoho-attachment-bridge/issues/9)) |
 | WorkDrive | download to local workspace | mocked download verification ([#16](https://github.com/sprintberlin/zoho-attachment-bridge/issues/16)) |

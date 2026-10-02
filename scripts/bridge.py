@@ -91,6 +91,7 @@ WORKDRIVE_DOWNLOAD_404_DELAY_SECONDS: float = 3.0
 DEFAULT_MAX_UPLOAD_BYTES: Dict[str, int] = {
     "expense-receipt": 7 * 1024 * 1024,
     "bill-attachment": 5 * 1024 * 1024,
+    "salesorder-attachment": 5 * 1024 * 1024,
     "file-upload": WORKDRIVE_MAX_UPLOAD_BYTES,
     "new-version": WORKDRIVE_MAX_UPLOAD_BYTES,
 }
@@ -98,6 +99,7 @@ DEFAULT_MAX_UPLOAD_BYTES: Dict[str, int] = {
 _TARGET_LIMIT_ENV: Dict[str, str] = {
     "expense-receipt": "ZOHO_BRIDGE_MAX_BYTES_EXPENSE_RECEIPT",
     "bill-attachment": "ZOHO_BRIDGE_MAX_BYTES_BILL_ATTACHMENT",
+    "salesorder-attachment": "ZOHO_BRIDGE_MAX_BYTES_SALESORDER_ATTACHMENT",
     "journal-attachment": "ZOHO_BRIDGE_MAX_BYTES_JOURNAL_ATTACHMENT",
     "record-attachment": "ZOHO_BRIDGE_MAX_BYTES_RECORD_ATTACHMENT",
     "file-upload": "ZOHO_BRIDGE_MAX_BYTES_FILE_UPLOAD",
@@ -109,6 +111,7 @@ _TARGET_LIMIT_ENV: Dict[str, str] = {
 _LIMIT_LABELS: Dict[str, str] = {
     "expense-receipt": "7 MB",
     "bill-attachment": "5 MB",
+    "salesorder-attachment": "5 MB",
     "file-upload": "250 MB",
     "new-version": "250 MB",
 }
@@ -127,6 +130,11 @@ EXPENSE_RECEIPT_EXTENSIONS: Set[str] = {
     ".pdf", ".xls", ".xlsx", ".doc", ".docx",
 }
 
+SALESORDER_ATTACHMENT_EXTENSIONS: Set[str] = {
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp",
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx",
+}
+
 BILL_ATTACHMENT_EXTENSIONS: Set[str] = {
     ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".pdf",
 }
@@ -134,6 +142,7 @@ BILL_ATTACHMENT_EXTENSIONS: Set[str] = {
 _TARGET_EXTENSIONS: Dict[str, Set[str]] = {
     "expense-receipt": EXPENSE_RECEIPT_EXTENSIONS,
     "bill-attachment": BILL_ATTACHMENT_EXTENSIONS,
+    "salesorder-attachment": SALESORDER_ATTACHMENT_EXTENSIONS,
 }
 
 # ---------------------------------------------------------------------------
@@ -1213,6 +1222,81 @@ def verify_books_expense_receipt(
         f"Expected {expected_sha256}, got {downloaded_sha256}"
     )
 
+
+
+
+def upload_books_salesorder_attachment(
+    dc: str,
+    access_token: str,
+    organization_id: str,
+    salesorder_id: str,
+    file_path: str,
+    max_bytes: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Upload sales order attachment using multipart/form-data.
+    POST /books/v3/salesorders/{salesorder_id}/attachment?organization_id={org_id}
+    """
+    validate_file_extension(file_path, "salesorder-attachment")
+    validate_file_size(file_path, "salesorder-attachment", override_bytes=max_bytes)
+    body, content_type = build_multipart_body(file_path, field_name="attachment")
+    url = (
+        f"{books_base_url(dc)}/salesorders/{salesorder_id}/attachment"
+        f"?organization_id={organization_id}"
+    )
+    status, resp_bytes = api_request(
+        url, access_token, data=body, content_type=content_type, method="POST"
+    )
+    return parse_zoho_response(resp_bytes, status, "Sales order attachment upload")
+
+
+def download_books_salesorder_attachment(
+    dc: str,
+    access_token: str,
+    organization_id: str,
+    salesorder_id: str,
+) -> bytes:
+    """
+    Download the attachment of a sales order.
+    GET /books/v3/salesorders/{salesorder_id}/attachment?organization_id={org_id}
+    """
+    url = (
+        f"{books_base_url(dc)}/salesorders/{salesorder_id}/attachment"
+        f"?organization_id={organization_id}"
+    )
+    status, body = api_request(url, access_token, method="GET")
+    if status >= 400:
+        err_text = body.decode("utf-8", errors="replace")
+        raise RuntimeError(f"Failed to download sales order attachment: HTTP {status} — {err_text}")
+    return body
+
+
+def verify_books_salesorder_attachment(
+    dc: str,
+    access_token: str,
+    organization_id: str,
+    salesorder_id: str,
+    expected_sha256: str,
+) -> Tuple[bool, str]:
+    """
+    Read back and verify the uploaded sales order attachment by downloading it
+    and comparing the SHA-256 hash.
+    Returns (success_bool, message).
+    """
+    try:
+        downloaded = download_books_salesorder_attachment(
+            dc, access_token, organization_id, salesorder_id
+        )
+    except Exception as exc:
+        return False, f"Verification failed: unable to read back attachment ({exc})"
+
+    downloaded_sha256 = sha256_bytes(downloaded)
+    if downloaded_sha256 == expected_sha256:
+        return True, f"Verified: SHA-256 match ({downloaded_sha256})"
+    return False, (
+        f"Verification failed: SHA-256 mismatch. "
+        f"Expected {expected_sha256}, got {downloaded_sha256}"
+    )
 
 def verify_books_bill_attachment(
     dc: str,

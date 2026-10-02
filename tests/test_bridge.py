@@ -473,6 +473,64 @@ class TestOAuthAndHttp(unittest.TestCase):
 
 
 class TestBooksOperationsAndVerification(unittest.TestCase):
+
+    @patch("bridge.api_request")
+    def test_upload_books_salesorder_attachment(self, mock_api):
+        mock_api.return_value = (200, json.dumps({
+            "code": 0,
+            "message": "Document attached.",
+        }).encode("utf-8"))
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"PDF sales order data")
+            tmp_path = tmp.name
+
+        try:
+            res = bridge.upload_books_salesorder_attachment(
+                dc="eu",
+                access_token="tok",
+                organization_id="12345",
+                salesorder_id="so777",
+                file_path=tmp_path,
+            )
+            self.assertEqual(res["code"], 0)
+            args, kwargs = mock_api.call_args
+            self.assertIn("/salesorders/so777/attachment?organization_id=12345", args[0])
+            self.assertEqual(kwargs.get("method"), "POST")
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    @patch("bridge.download_books_salesorder_attachment")
+    def test_verify_books_salesorder_attachment_match(self, mock_download):
+        raw_bytes = b"Exact same sales order attachment content"
+        expected_sha = bridge.sha256_bytes(raw_bytes)
+        mock_download.return_value = raw_bytes
+
+        verified, msg = bridge.verify_books_salesorder_attachment(
+            dc="eu",
+            access_token="tok",
+            organization_id="12345",
+            salesorder_id="so777",
+            expected_sha256=expected_sha,
+        )
+        self.assertTrue(verified)
+        self.assertIn("Verified: SHA-256 match", msg)
+
+    @patch("bridge.download_books_salesorder_attachment")
+    def test_verify_books_salesorder_attachment_mismatch(self, mock_download):
+        mock_download.return_value = b"Different content"
+
+        verified, msg = bridge.verify_books_salesorder_attachment(
+            dc="eu",
+            access_token="tok",
+            organization_id="12345",
+            salesorder_id="so777",
+            expected_sha256="expectedhashvalue12345",
+        )
+        self.assertFalse(verified)
+        self.assertIn("Verification failed: SHA-256 mismatch", msg)
+
     """Test Books upload and read-back verification flows."""
 
     @patch("bridge.api_request")
@@ -1176,6 +1234,42 @@ class TestWorkDriveOperationsAndVerification(unittest.TestCase):
 
 
 class TestCliZohoAttach(unittest.TestCase):
+    @patch("zoho_attach.verify_books_salesorder_attachment")
+    @patch("zoho_attach.upload_books_salesorder_attachment")
+    @patch("zoho_attach.load_env")
+    @patch("zoho_attach.refresh_access_token")
+    def test_successful_salesorder_upload_and_verification(
+        self, mock_refresh, mock_env, mock_upload, mock_verify
+    ):
+        mock_env.return_value = {
+            "client_id": "cid",
+            "client_secret": "sec",
+            "refresh_token": "ref",
+            "dc": "eu",
+            "books_org_id": "org123",
+        }
+        mock_refresh.return_value = "access_token_123"
+        mock_upload.return_value = {"code": 0, "message": "success"}
+        mock_verify.return_value = (True, "Verified: SHA-256 match (abc...)")
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(b"dummy sales order pdf content")
+            tmp_path = tmp.name
+
+        try:
+            exit_code = zoho_attach.main([
+                "--app", "books",
+                "--target", "salesorder-attachment",
+                "--id", "so_999",
+                "--file", tmp_path,
+            ])
+            self.assertEqual(exit_code, 0)
+            mock_upload.assert_called_once()
+            mock_verify.assert_called_once()
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
     """Test zoho_attach CLI execution."""
 
     def test_file_not_found_returns_error(self):
